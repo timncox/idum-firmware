@@ -1,3 +1,10 @@
+#ifdef IDUM_SIM
+
+#define digitalWriteFast(pin, val) digitalWrite((pin), (val))
+#define digitalReadFast(pin) digitalRead((pin))
+
+#else
+
 /*
  * Improved fast digital IO.
  * Copyright November 2018 by Bill Westfield.   BSD license.
@@ -137,4 +144,6 @@ static inline __attribute__((always_inline)) uint8_t _drfast(uint8_t pin) {
         LTO_Not_Enabled();
     return (*inport & mask);
 }
+#endif
+
 #endif
