@@ -2,6 +2,7 @@
 set -eu
 
 ARDUINO_CLI="${ARDUINO_CLI:-arduino-cli}"
+ARDUINO_CONFIG="${ARDUINO_CONFIG:-arduino-cli.yaml}"
 
 if ! command -v "$ARDUINO_CLI" >/dev/null 2>&1; then
   cat >&2 <<'EOF'
@@ -18,5 +19,4 @@ EOF
   exit 1
 fi
 
-"$ARDUINO_CLI" version
-
+"$ARDUINO_CLI" --config-file "$ARDUINO_CONFIG" version
