@@ -48,7 +48,7 @@ At a high level:
 4. `a70_handleDisplay.ino` multiplexes the mode LEDs.
 5. `x_utils.ino` handles EEPROM bit packing for options and enabled modes.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a more detailed map.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a file map and [docs/CODE_WALKTHROUGH.md](docs/CODE_WALKTHROUGH.md) for a source-derived explanation of how v0.99 works.
 
 ## Source
 
