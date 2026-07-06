@@ -37,10 +37,10 @@ make build
 Default target:
 
 ```sh
-FQBN=arduino:megaavr:nona4809
+FQBN=arduino:megaavr:nona4809:mode=off
 ```
 
-The default is an informed starting point, not yet a hardware-confirmed fact. The source uses the Nano analog pin numbering pattern (`14..21`) and v.99 attaches interrupts on several trigger pins, which is compatible with a Nano Every/ATmega4809-style target in a way a classic ATmega328P Nano is not.
+This targets the observed Arduino Nano Every / ATmega4809 controller and disables ATmega328 register emulation.
 
 ## Upload
 
@@ -59,6 +59,6 @@ make upload PORT=/dev/cu.usbmodem101
 If the bootloader/board is different, override `FQBN`:
 
 ```sh
-make build FQBN=arduino:avr:nano
-make upload FQBN=arduino:avr:nano PORT=/dev/cu.usbserial-110
+make build FQBN=arduino:megaavr:nona4809
+make upload FQBN=arduino:megaavr:nona4809 PORT=/dev/cu.usbmodem101
 ```

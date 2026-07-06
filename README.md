@@ -27,10 +27,10 @@ Arduino CLI state is kept under the ignored `.arduino/` directory via `arduino-c
 The default board target is:
 
 ```sh
-arduino:megaavr:nona4809
+arduino:megaavr:nona4809:mode=off
 ```
 
-That matches the v.99 source better than a classic Nano because the sketch uses Arduino Nano-style pin numbers, analog pins as digital pins, and pin-change interrupts on pins beyond `2` and `3`. We still need to verify the exact production MCU/bootloader on an IDUM before treating this as final.
+That matches the observed hardware: an Arduino Nano Every daughterboard with an ATmega4809 MCU. The `mode=off` option disables ATmega328 register emulation and uses native ATmega4809 definitions.
 
 Override the board target like this:
 
@@ -48,7 +48,7 @@ At a high level:
 4. `a70_handleDisplay.ino` multiplexes the mode LEDs.
 5. `x_utils.ino` handles EEPROM bit packing for options and enabled modes.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a file map and [docs/CODE_WALKTHROUGH.md](docs/CODE_WALKTHROUGH.md) for a source-derived explanation of how v0.99 works.
+See [docs/HARDWARE.md](docs/HARDWARE.md) for hardware notes, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a file map, and [docs/CODE_WALKTHROUGH.md](docs/CODE_WALKTHROUGH.md) for a source-derived explanation of how v0.99 works.
 
 ## Source
 

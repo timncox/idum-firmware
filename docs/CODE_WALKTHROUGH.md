@@ -40,7 +40,7 @@ Inputs and outputs are inverted by hardware buffers:
 - Gate input reads are negated: `clockIn = !digitalReadFast(clockPin)`.
 - Gate output writes are inverted: writing `LOW` turns an output gate on, writing `HIGH` turns it off.
 
-The code uses Arduino pin numbers `14..21` as analog/digital pins and compiles against `arduino:megaavr:nona4809`, consistent with an Arduino Nano Every / ATmega4809-style board target. We still need physical hardware confirmation before treating that as a guarantee.
+The module uses an Arduino Nano Every daughterboard with an ATmega4809 MCU. The default build target is `arduino:megaavr:nona4809:mode=off`, which disables ATmega328 register emulation and uses native ATmega4809 definitions.
 
 ## Input Pipeline
 
@@ -243,4 +243,3 @@ Promising state groups:
 - `ModificationState`
 - `LooperState`
 - `OutputState`
-
