@@ -1,0 +1,22 @@
+board_manager:
+  additional_urls: []
+directories:
+  data: .arduino/data
+  downloads: .arduino/downloads
+  user: .arduino/user
+library:
+  enable_unsafe_install: false
+logging:
+  file: ""
+  format: text
+  level: info
+metrics:
+  addr: :9090
+  enabled: false
+output:
+  no_color: false
+sketch:
+  always_export_binaries: false
+updater:
+  enable_notification: false
+

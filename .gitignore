@@ -1,0 +1,11 @@
+build/
+.arduino/
+.DS_Store
+*.hex
+*.elf
+*.map
+*.eep
+*.lst
+*.o
+*.d
+
