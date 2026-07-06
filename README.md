@@ -7,6 +7,7 @@ The goal is to make the firmware hackable without requiring the Arduino GUI edit
 ## Layout
 
 - `firmware/idum/` - imported v.99 firmware source, with the main sketch normalized to `idum.ino`
+- `sim/` - host-side simulator for exercising firmware behavior without flashing the module
 - `scripts/` - convenience wrappers for command-line setup, build, and upload
 - `docs/` - architecture notes and build/install details
 
@@ -38,6 +39,33 @@ Override the board target like this:
 make build FQBN=arduino:avr:nano
 ```
 
+## Host Simulator
+
+The `sim/` directory contains a small desktop harness that compiles the firmware as ordinary C++ and provides fake Arduino functions for pins, analog reads, EEPROM, time, and random numbers. It is not an ATmega4809 emulator, but it lets us exercise the firmware's normal `setup()` and `loop()` paths and inspect output pin behavior before flashing hardware.
+
+The simulator uses one firmware compatibility shim: when built with `IDUM_SIM`, `digitalReadFast()` and `digitalWriteFast()` route to the simulator's fake `digitalRead()` and `digitalWrite()` functions. Normal Arduino builds keep the original fast AVR I/O path.
+
+Run a smoke test:
+
+```sh
+make sim
+```
+
+Run characteristic scenarios for all documented modes:
+
+```sh
+make sim-modes
+```
+
+Inspect Break mode's embedded pattern table, or recreate those patterns through simulated clock and trigger I/O:
+
+```sh
+make sim-break-patterns
+make sim-break-playback
+```
+
+The simulator is useful for regression tests around timing-sensitive behavior, CV scaling, mode selection, clock-derived events, loop playback, and output inversion. It does not replace flashing the module for final validation, but it gives us a much faster place to iterate on behavior.
+
 ## Current Firmware Flow
 
 At a high level:
@@ -52,7 +80,9 @@ See [docs/HARDWARE.md](docs/HARDWARE.md) for hardware notes, [docs/ARCHITECTURE.
 
 ## Source
 
-Imported from `IDUM-github-official/firmwares/IDUM_Firmware_v_99.zip`.
+Canonical upstream source: [mysticcircuits/IDUM](https://github.com/mysticcircuits/IDUM).
+
+This repo started from the v.99 firmware archive at `IDUM-github-official/firmwares/IDUM_Firmware_v_99.zip`.
 
 Original author: Eli Pechman / Mystic Circuits.
 
