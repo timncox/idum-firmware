@@ -749,6 +749,7 @@ void trig2InterruptHandler();
 void trig3InterruptHandler();
 void trig4InterruptHandler();
 int wrapAround(int number, int range);
+bool pulseWithinInterval(unsigned long elapsed, unsigned long interval, unsigned long pulseWidth);
 byte getModeByte();
 void setModeArray(byte modeByte);
 byte getOptionByte();

@@ -25,7 +25,7 @@ void burst() {
 
     //If we are on the right side of the param knob we are multiplying the clock speed
     if (unscaledParam1 > 7) {
-      scaledClockInterval1 = lastClockInterval / ratchetAmount1;  //to multiply the clock speed we divide the most recent clock interval
+      scaledClockInterval1 = (ratchetAmount1 > 0) ? lastClockInterval / ratchetAmount1 : 0;  //to multiply the clock speed we divide the most recent clock interval
     }
 
     //if we are on the left side of the param knob we are dividing the clock speed
@@ -39,7 +39,7 @@ void burst() {
     //This makes it so that we can split each clock cycle into an even number of subdivisions and detect the time since we passed one of those
     //subdivisions.  Then we set the trigger out high if we are within a certain period of time from one of those subdivisions.
 
-    trig1State = ((currentMicros - lastTrig1Time) % scaledClockInterval1) < 10000;  //bursted clocks are only 10 milliseconds long.  Should be
+    trig1State = pulseWithinInterval(currentMicros - lastTrig1Time, scaledClockInterval1, 10000);  //bursted clocks are only 10 milliseconds long.  Should be
     //changed at some point to allow a more dynamic trigger length depending on the clock time and burst ratchet speed.
   }
 
@@ -47,14 +47,14 @@ void burst() {
   //and the mode for that channel is set to burst
   if ((modifyLength2 > 0) && (mode2 == 1)) {
     if (unscaledParam2 > 7) {
-      scaledClockInterval2 = lastClockInterval / ratchetAmount2;
+      scaledClockInterval2 = (ratchetAmount2 > 0) ? lastClockInterval / ratchetAmount2 : 0;
     }
 
     else {
       scaledClockInterval2 = lastClockInterval * ratchetAmount2;
     }
 
-    trig2State = ((currentMicros - lastTrig2Time) % scaledClockInterval2) < 10000;  //(scaledClockInterval2 / 2);
+    trig2State = pulseWithinInterval(currentMicros - lastTrig2Time, scaledClockInterval2, 10000);  //(scaledClockInterval2 / 2);
   }
 
   //run the modification code on each trigger channel if we the modify length for that channel is more than 0
@@ -62,14 +62,14 @@ void burst() {
   if ((modifyLength3 > 0) && (mode3 == 1)) {
 
     if (unscaledParam3 > 7) {
-      scaledClockInterval3 = lastClockInterval / ratchetAmount3;
+      scaledClockInterval3 = (ratchetAmount3 > 0) ? lastClockInterval / ratchetAmount3 : 0;
     }
 
     else {
       scaledClockInterval3 = lastClockInterval * ratchetAmount3;
     }
 
-    trig3State = ((currentMicros - lastTrig3Time) % scaledClockInterval3) < 10000;
+    trig3State = pulseWithinInterval(currentMicros - lastTrig3Time, scaledClockInterval3, 10000);
   }
 
   //run the modification code on each trigger channel if we the modify length for that channel is more than 0
@@ -77,14 +77,14 @@ void burst() {
   if ((modifyLength4 > 0) && (mode4 == 1)) {
 
     if (unscaledParam4 > 7) {
-      scaledClockInterval4 = lastClockInterval / ratchetAmount4;
+      scaledClockInterval4 = (ratchetAmount4 > 0) ? lastClockInterval / ratchetAmount4 : 0;
     }
 
     else {
       scaledClockInterval4 = lastClockInterval * ratchetAmount4;
     }
 
-    trig4State = ((currentMicros - lastTrig4Time) % scaledClockInterval4) < 10000;
+    trig4State = pulseWithinInterval(currentMicros - lastTrig4Time, scaledClockInterval4, 10000);
   }
 }
 

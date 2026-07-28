@@ -24,7 +24,8 @@ void skip() {
       clockChoke = 1;    //we enable the clock
 
       //here we run the same code we do in the normal ratchet modes but on the clock output
-      clockRatchetState = ((micros() - lastClockTime) % (lastClockInterval / ((unsigned long)skipRatchetAmount))) < (lastClockInterval / ((unsigned long)skipRatchetAmount * 2));
+      unsigned long skipRatchetInterval = (skipRatchetAmount > 0) ? lastClockInterval / ((unsigned long)skipRatchetAmount) : 0;
+      clockRatchetState = pulseWithinInterval(micros() - lastClockTime, skipRatchetInterval, skipRatchetInterval / 2);
 
       if (clockRatchetState && !clockRatchetStateOld) {  //if the clock output just turned on add to the cycle count for the maintain cycle function
         clockRatchetCycleCount += 1;

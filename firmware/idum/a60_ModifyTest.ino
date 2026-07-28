@@ -375,7 +375,7 @@ void activateModification() {
     if (!splitMode) {                                                              //if we are not in split mode we set all of these variables at once, otherwise we set them individually
       if (!(carryOver && !carryOverDisable)) {                                     //if carryOver is disabled we do this no matter what
         breakIndex1 = breakIndex2 = breakIndex3 = breakIndex4 = 0;                 //reset all of the break beat counters
-        trig1Divide = trig2Divide = trig4Divide = trig4Divide = clockDivide = -1;  //reset the clock divide counters
+        trig1Divide = trig2Divide = trig3Divide = trig4Divide = clockDivide = -1;  //reset the clock divide counters
         bounce1Time = bounce2Time = bounce3Time = bounce4Time = 0;                 //reset the bouncing ball counters
 
         //chokes make it so that each output only turns on after a trigger is received during each modification

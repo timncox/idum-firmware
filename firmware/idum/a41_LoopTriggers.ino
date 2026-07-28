@@ -31,7 +31,7 @@ void calculateLooperVariables() {
 
   //if we get a rising edge at the clock input
   if (clockEdge) {
-    loopDivide = (loopDivide + 1) % (loopRatchetAmount);  //increase the counter that handles dividing the input clock
+    if (loopRatchetAmount > 0) loopDivide = (loopDivide + 1) % (loopRatchetAmount);  //increase the counter that handles dividing the input clock
     loopCycleCount += 1;                                  //increase the counter that tracks how many clocks have passed to maintain the cycle
   }
 
@@ -42,7 +42,8 @@ void calculateLooperVariables() {
     //clock interval.  If the clock speed isn't changing this gives a pretty good multiplication of the clock.  We give a high output when
     //the result of this calculation is less than 5000 for a 5 ms trigger to hopefully allow really fast clock multiplications.
 
-    loopClockMult = (((currentMicros - lastClockTime) % (lastClockInterval / (loopRatchetAmount))) < 5000);
+    unsigned long loopMultInterval = (loopRatchetAmount > 0) ? lastClockInterval / loopRatchetAmount : 0;
+    loopClockMult = pulseWithinInterval(currentMicros - lastClockTime, loopMultInterval, 5000);
 
   }
 
@@ -78,7 +79,7 @@ void calculateLooperVariables() {
   //multiplied or divided clock tick.  This works quite well at fast and slow speed but requires the loop to count at least one
   //clock in order to update it's time.
   if ((loopClockSpeed != 7) && (loopClockSpeed != 8) && (loopClockSpeed != 9)) {
-    tickIndex = (4 * (currentMicros - loopClockMultTime)) / (loopClockMultInterval);
+    if (loopClockMultInterval > 0) tickIndex = (4 * (currentMicros - loopClockMultTime)) / (loopClockMultInterval);
   }
 
   if (loopLength == 1) loopIndex = loopOffset;         //if the loop length is at minimum the loop index is set to be the loop offset

@@ -17,6 +17,12 @@ int wrapAround(int number, int range) {
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
+bool pulseWithinInterval(unsigned long elapsed, unsigned long interval, unsigned long pulseWidth) {
+  return (interval > 0) && ((elapsed % interval) < pulseWidth);
+}
+
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
 //turns the bits in the mode array into a single byte for saving it more easily in the EEPROM
 
 byte getModeByte() {
