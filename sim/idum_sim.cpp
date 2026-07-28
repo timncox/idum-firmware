@@ -177,6 +177,35 @@ void establishTriggerIntervals(unsigned long intervalMicros = 250000) {
   runFor(intervalMicros - 10000, 100);
 }
 
+void runClockTrain(unsigned int pulses, unsigned long intervalMicros = 250000) {
+  for (unsigned int i = 0; i < pulses; i++) {
+    runFor(intervalMicros - 10000, 100);
+    pulseGate(15, 5000, 100);
+  }
+}
+
+void pulseClockAndTriggerInputs(unsigned long highMicros = 5000, unsigned long stepMicros = 100) {
+  setLogicalGate(15, true);
+  setLogicalGate(14, true);
+  setLogicalGate(9, true);
+  setLogicalGate(11, true);
+  setLogicalGate(10, true);
+  runFor(highMicros, stepMicros);
+  setLogicalGate(15, false);
+  setLogicalGate(14, false);
+  setLogicalGate(9, false);
+  setLogicalGate(11, false);
+  setLogicalGate(10, false);
+  runFor(highMicros, stepMicros);
+}
+
+void runClockAndTriggerTrain(unsigned int pulses, unsigned long intervalMicros = 250000) {
+  for (unsigned int i = 0; i < pulses; i++) {
+    runFor(intervalMicros - 10000, 100);
+    pulseClockAndTriggerInputs();
+  }
+}
+
 int runModeScenario(
   const std::string& name,
   const std::function<bool()>& scenario,
@@ -313,8 +342,73 @@ int clockRatchetScenario() {
   }, "burst mode gates trigger outputs from the clock-based repeat engine", "expected trigger output activity from clock-based burst mode");
 }
 
+int clockRatchetDivideScenario() {
+  return runModeScenario("clock-ratchet-divide", [] {
+    establishClockInterval();
+    establishTriggerIntervals();
+    configureAlwaysModify(1, 0, 1024);
+
+    pulseGate(15, 5000, 100);
+    runFor(20000);
+    pulseTriggerInputs(5000, 100);
+    runClockTrain(10);
+
+    return countOutputOnsets(7) >= 2;
+  }, "left-side PARAM produces divided clock-based repeats with a long enough window", "expected divided burst output after the input trigger");
+}
+
+int clockRatchetSparseMinLengthScenario() {
+  return runModeScenario("clock-ratchet-sparse-min-length", [] {
+    establishClockInterval();
+    configureAlwaysModify(1, 1024, 0);
+
+    writes.clear();
+    for (unsigned int i = 0; i < 40; i++) {
+      runFor(240000, 100);
+      if (i == 4) {
+        pulseClockAndTriggerInputs();
+      } else {
+        pulseGate(15, 5000, 100);
+      }
+    }
+
+    const unsigned long noTriggerAfter = 3000000;
+    return !hasWriteAfter(7, LOW, noTriggerAfter);
+  }, "minimum-length burst stops after a sparse input trigger", "expected no TR1 bursts long after the only sparse input trigger");
+}
+
 int triggerRatchetScenario() {
   return ratchetScenario();
+}
+
+int triggerRatchetDivideScenario() {
+  return runModeScenario("trigger-ratchet-divide", [] {
+    establishClockInterval();
+    establishTriggerIntervals();
+    configureAlwaysModify(2, 0, 1024);
+
+    pulseGate(15, 5000, 100);
+    runFor(20000);
+    pulseTriggerInputs(5000, 100);
+    runClockTrain(10);
+
+    return countOutputOnsets(7) >= 2;
+  }, "left-side PARAM produces divided trigger-based repeats with a long enough window", "expected divided ratchet output after the input trigger");
+}
+
+int triggerRatchetDivideSteadyScenario() {
+  return runModeScenario("trigger-ratchet-divide-steady", [] {
+    establishClockInterval();
+    establishTriggerIntervals();
+    configureAlwaysModify(2, 0, 1024);
+
+    pulseGate(15, 5000, 100);
+    runFor(20000);
+    writes.clear();
+    runClockAndTriggerTrain(8);
+
+    return countOutputOnsets(7) != 8;
+  }, "left-side PARAM changes a steady trigger stream", "expected divided ratchet mode to alter, not merely pass through, eight steady input triggers");
 }
 
 int ballScenario() {
@@ -590,7 +684,9 @@ int allModesScenario() {
   const std::vector<std::string> scenarios = {
     "hold",
     "clock-ratchet",
+    "clock-ratchet-divide",
     "trigger-ratchet",
+    "trigger-ratchet-divide",
     "ball",
     "rotate",
     "delay",
@@ -613,7 +709,11 @@ int runScenario(const std::string& name) {
   if (name == "smoke") return smokeScenario();
   if (name == "hold") return holdScenario();
   if (name == "clock-ratchet") return clockRatchetScenario();
+  if (name == "clock-ratchet-divide") return clockRatchetDivideScenario();
+  if (name == "clock-ratchet-sparse-min-length") return clockRatchetSparseMinLengthScenario();
   if (name == "trigger-ratchet") return triggerRatchetScenario();
+  if (name == "trigger-ratchet-divide") return triggerRatchetDivideScenario();
+  if (name == "trigger-ratchet-divide-steady") return triggerRatchetDivideSteadyScenario();
   if (name == "ratchet") return triggerRatchetScenario();
   if (name == "ball") return ballScenario();
   if (name == "rotate") return rotateScenario();
@@ -626,7 +726,7 @@ int runScenario(const std::string& name) {
   if (name == "all-modes") return allModesScenario();
 
   std::cerr << "Unknown scenario: " << name << '\n';
-  std::cerr << "Available scenarios: smoke, hold, clock-ratchet, trigger-ratchet, ball, rotate, delay, break, clock-stop-burst, break-patterns, break-playback, skip, all-modes\n";
+  std::cerr << "Available scenarios: smoke, hold, clock-ratchet, clock-ratchet-divide, clock-ratchet-sparse-min-length, trigger-ratchet, trigger-ratchet-divide, trigger-ratchet-divide-steady, ball, rotate, delay, break, clock-stop-burst, break-patterns, break-playback, skip, all-modes\n";
   return 2;
 }
 

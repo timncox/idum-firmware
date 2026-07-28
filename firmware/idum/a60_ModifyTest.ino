@@ -66,6 +66,10 @@ bool isClockTimeoutMode(unsigned int currentMode) {
   return (currentMode == 1) || (currentMode == 2) || (currentMode == 6);
 }
 
+bool isGeneratedTriggerCarryOverMode(unsigned int currentMode) {
+  return (currentMode == 1) || (currentMode == 2);
+}
+
 void handleClockTimeout() {
 
   if (!modificationActive || (lastClockInterval == 0)) return;
@@ -384,6 +388,13 @@ void activateModification() {
         }
       }
 
+      else if (rearmGeneratedTriggerChokesOnCarryOver && isGeneratedTriggerCarryOverMode(mode)) {
+        if (!trig1In) trig1Choke = 0;
+        if (!trig2In) trig2Choke = 0;
+        if (!trig3In) trig3Choke = 0;
+        if (!trig4In) trig4Choke = 0;
+      }
+
       ///////////////////////////////////////////////////////////////////////////////////////
       //CALCULATE MODE SPECIFIC VARIABLES AT MODIFICATION START TO HELP WITH BUG PREVENTION//
       ///////////////////////////////////////////////////////////////////////////////////////
@@ -442,6 +453,8 @@ void activateModification() {
           if (!trig1In) trig1Choke = 0;
         }
       }
+
+      else if (rearmGeneratedTriggerChokesOnCarryOver && isGeneratedTriggerCarryOverMode(mode1) && !trig1In) trig1Choke = 0;
     }
 
     if (startModification2) {
@@ -470,6 +483,8 @@ void activateModification() {
           if (!trig2In) trig2Choke = 0;
         }
       }
+
+      else if (rearmGeneratedTriggerChokesOnCarryOver && isGeneratedTriggerCarryOverMode(mode2) && !trig2In) trig2Choke = 0;
     }
 
     if (startModification3) {
@@ -498,6 +513,8 @@ void activateModification() {
           if (!trig3In) trig3Choke = 0;
         }
       }
+
+      else if (rearmGeneratedTriggerChokesOnCarryOver && isGeneratedTriggerCarryOverMode(mode3) && !trig3In) trig3Choke = 0;
     }
 
     if (startModification4) {
@@ -526,6 +543,8 @@ void activateModification() {
           if (!trig4In) trig4Choke = 0;
         }
       }
+
+      else if (rearmGeneratedTriggerChokesOnCarryOver && isGeneratedTriggerCarryOverMode(mode4) && !trig4In) trig4Choke = 0;
     }
   }
 }

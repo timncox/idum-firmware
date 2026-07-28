@@ -42,6 +42,14 @@ bool carryOverDisable = 0;    //default = 0
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
+//Generated trigger carryover behavior.
+//Burst and Multiply/Divide can carry over from one modification window into the next. Re-arming chokes during carryover keeps a sparse
+//trigger from unlocking endless generated pulses when chance is high and length is short.
+
+bool rearmGeneratedTriggerChokesOnCarryOver = 1; //default = 1
+
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
 //Probability behavior.  Lowering probabilityLowerThreshold lets the bottom of the Chance slider produce tiny amounts of randomness.
 //A value of 0 means the fully-down slider is still off, but anything above zero can trigger a very rare modification.
 //probabilityLengthPenalty makes long modifications less likely to immediately retrigger.
