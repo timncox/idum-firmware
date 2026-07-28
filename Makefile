@@ -5,7 +5,7 @@ SKETCH ?= firmware/idum
 BUILD_PATH ?= build/idum
 PORT ?=
 
-.PHONY: help doctor setup build upload adc-diagnostic-build adc-diagnostic-upload clean board-list sim sim-modes sim-clock-stop sim-break-patterns sim-break-playback sim-clean
+.PHONY: help doctor setup build upload safe-io-build safe-io-upload adc-diagnostic-build adc-diagnostic-upload clean board-list sim sim-modes sim-clock-stop sim-break-patterns sim-break-playback sim-clean
 
 help:
 	@echo "IDUM firmware build targets"
@@ -13,6 +13,8 @@ help:
 	@echo "  make setup                Install/update the Arduino megaAVR core"
 	@echo "  make doctor               Check local command-line toolchain"
 	@echo "  make build                Compile firmware/idum for $(FQBN)"
+	@echo "  make safe-io-build        Compile firmware using normal Arduino pin I/O"
+	@echo "  make safe-io-upload PORT=<port> Upload normal Arduino pin I/O firmware"
 	@echo "  make adc-diagnostic-build Compile USB ADC diagnostic firmware"
 	@echo "  make adc-diagnostic-upload PORT=<port> Upload USB ADC diagnostic firmware"
 	@echo "  make sim                  Build and run the host-side simulator smoke test"
@@ -43,6 +45,13 @@ build:
 upload:
 	@if [ -z "$(PORT)" ]; then echo "Set PORT, for example: make upload PORT=/dev/cu.usbmodem101"; exit 2; fi
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) upload -p $(PORT) --fqbn $(FQBN) --input-dir $(BUILD_PATH) $(SKETCH)
+
+safe-io-build:
+	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) compile --fqbn $(FQBN) --build-path $(BUILD_PATH)-safe-io --build-property compiler.cpp.extra_flags="-DIDUM_DISABLE_FAST_IO=1" $(SKETCH)
+
+safe-io-upload:
+	@if [ -z "$(PORT)" ]; then echo "Set PORT, for example: make safe-io-upload PORT=/dev/cu.usbmodem101"; exit 2; fi
+	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) upload -p $(PORT) --fqbn $(FQBN) --input-dir $(BUILD_PATH)-safe-io $(SKETCH)
 
 adc-diagnostic-build:
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) compile --fqbn $(FQBN) --build-path $(BUILD_PATH)-adc --build-property compiler.cpp.extra_flags="-DIDUM_ADC_DIAGNOSTIC=1" $(SKETCH)

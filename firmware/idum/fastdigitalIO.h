@@ -1,4 +1,4 @@
-#ifdef IDUM_SIM
+#if defined(IDUM_SIM) || defined(IDUM_DISABLE_FAST_IO)
 
 #define digitalWriteFast(pin, val) digitalWrite((pin), (val))
 #define digitalReadFast(pin) digitalRead((pin))
