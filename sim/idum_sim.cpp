@@ -377,6 +377,44 @@ int breakScenario() {
   }, "break mode emits preset rhythm activity", "expected repeated trigger output from break mode");
 }
 
+int clockStopBurstScenario() {
+  resetSimulation();
+  setup();
+  writes.clear();
+
+  establishClockInterval();
+  establishTriggerIntervals();
+  configureAlwaysModify(1, 850, 1024);
+
+  pulseGate(15, 5000, 100);
+  runFor(20000);
+  pulseTriggerInputs(5000, 100);
+
+  const unsigned long stoppedClockTime = simMicros;
+  writes.clear();
+  runFor(1000000);
+
+  const int tr1Onsets = countOutputOnsets(7);
+  const int tr2Onsets = countOutputOnsets(8);
+  const int tr3Onsets = countOutputOnsets(6);
+  const int tr4Onsets = countOutputOnsets(5);
+
+  std::cout << "clock stopped at " << stoppedClockTime << "us\n";
+  std::cout << "generated output onsets after stopped clock: "
+            << "TR1=" << tr1Onsets << ' '
+            << "TR2=" << tr2Onsets << ' '
+            << "TR3=" << tr3Onsets << ' '
+            << "TR4=" << tr4Onsets << '\n';
+
+  if (tr1Onsets == 0 && tr2Onsets == 0 && tr3Onsets == 0 && tr4Onsets == 0) {
+    std::cout << "PASS clock-stop-burst\n";
+    return 0;
+  }
+
+  std::cerr << "FAIL clock-stop-burst: generated repeats continued after the clock stopped\n";
+  return 1;
+}
+
 char breakCellSymbol(int value) {
   if (value == 0) return '.';
   if (value == 1) return 'x';
@@ -574,13 +612,14 @@ int runScenario(const std::string& name) {
   if (name == "rotate") return rotateScenario();
   if (name == "delay") return delayScenario();
   if (name == "break") return breakScenario();
+  if (name == "clock-stop-burst") return clockStopBurstScenario();
   if (name == "break-patterns") return breakPatternsScenario();
   if (name == "break-playback") return breakPlaybackScenario();
   if (name == "skip") return skipScenario();
   if (name == "all-modes") return allModesScenario();
 
   std::cerr << "Unknown scenario: " << name << '\n';
-  std::cerr << "Available scenarios: smoke, hold, clock-ratchet, trigger-ratchet, ball, rotate, delay, break, break-patterns, break-playback, skip, all-modes\n";
+  std::cerr << "Available scenarios: smoke, hold, clock-ratchet, trigger-ratchet, ball, rotate, delay, break, clock-stop-burst, break-patterns, break-playback, skip, all-modes\n";
   return 2;
 }
 
