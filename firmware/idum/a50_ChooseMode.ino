@@ -81,7 +81,7 @@ unsigned int calculateCustomBoundary(unsigned int leftModeIndex, unsigned int ri
 //This function creates a set of intervals based on the active modes.
 
 void calculateModeBoundaries() {
-  unsigned int intervalCount = 0;
+  intervalCount = 0;
 
   // First pass: Erase existing interval settings:
   initializeIntervals();
@@ -91,6 +91,12 @@ void calculateModeBoundaries() {
     if (activeModes[i]) {
       intervals[intervalCount++].mode = i;
     }
+  }
+
+  if (intervalCount == 0) {
+    activeModes[modePosition % 8] = 1;
+    intervals[intervalCount++].mode = modePosition % 8;
+    EEPROM.write(2, getModeByte());
   }
 
   // Third pass: Loop through each interval and find boundaries from custom table:
