@@ -28,10 +28,10 @@ Arduino CLI state is kept under the ignored `.arduino/` directory via `arduino-c
 The default board target is:
 
 ```sh
-arduino:megaavr:nona4809:mode=off
+arduino:megaavr:nona4809
 ```
 
-That matches the observed hardware: an Arduino Nano Every daughterboard with an ATmega4809 MCU. The `mode=off` option disables ATmega328 register emulation and uses native ATmega4809 definitions.
+That matches the observed hardware: an Arduino Nano Every daughterboard with an ATmega4809 MCU. The IDUM firmware pin numbers are written for the Nano Every's default ATmega328 register-emulation mapping; using `:mode=off` can scramble the panel controls.
 
 Override the board target like this:
 

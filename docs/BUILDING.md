@@ -37,10 +37,10 @@ make build
 Default target:
 
 ```sh
-FQBN=arduino:megaavr:nona4809:mode=off
+FQBN=arduino:megaavr:nona4809
 ```
 
-This targets the observed Arduino Nano Every / ATmega4809 controller and disables ATmega328 register emulation.
+This targets the observed Arduino Nano Every / ATmega4809 controller. Use the default ATmega328 register-emulation mapping; IDUM's firmware pin numbers depend on it.
 
 ## Upload
 
@@ -59,6 +59,6 @@ make upload PORT=/dev/cu.usbmodem101
 If the bootloader/board is different, override `FQBN`:
 
 ```sh
-make build FQBN=arduino:megaavr:nona4809
-make upload FQBN=arduino:megaavr:nona4809 PORT=/dev/cu.usbmodem101
+make build FQBN=arduino:megaavr:nona4809:mode=off
+make upload FQBN=arduino:megaavr:nona4809:mode=off PORT=/dev/cu.usbmodem101
 ```
