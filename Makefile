@@ -5,7 +5,7 @@ SKETCH ?= firmware/idum
 BUILD_PATH ?= build/idum
 PORT ?=
 
-.PHONY: help doctor setup build upload clean board-list sim sim-modes sim-break-patterns sim-break-playback sim-clean
+.PHONY: help doctor setup build upload clean board-list sim sim-modes sim-clock-stop sim-break-patterns sim-break-playback sim-clean
 
 help:
 	@echo "IDUM firmware build targets"
@@ -15,6 +15,7 @@ help:
 	@echo "  make build                Compile firmware/idum for $(FQBN)"
 	@echo "  make sim                  Build and run the host-side simulator smoke test"
 	@echo "  make sim-modes            Build and run simulator scenarios for all modes"
+	@echo "  make sim-clock-stop       Run the clock-stop generated-repeat regression"
 	@echo "  make sim-break-patterns   Print the Break mode preset rhythm table"
 	@echo "  make sim-break-playback   Recreate Break mode patterns through simulated I/O"
 	@echo "  make upload PORT=<port>   Compile and upload to a connected module"
@@ -53,6 +54,11 @@ sim-modes:
 	mkdir -p build/sim
 	c++ -std=c++17 -Wall -Wextra -Wno-unused-parameter -Wno-comment -Wno-sign-compare -Isim -Ifirmware/idum sim/idum_sim.cpp -o build/sim/idum-sim
 	build/sim/idum-sim all-modes
+
+sim-clock-stop:
+	mkdir -p build/sim
+	c++ -std=c++17 -Wall -Wextra -Wno-unused-parameter -Wno-comment -Wno-sign-compare -Isim -Ifirmware/idum sim/idum_sim.cpp -o build/sim/idum-sim
+	build/sim/idum-sim clock-stop-burst
 
 sim-break-patterns:
 	mkdir -p build/sim

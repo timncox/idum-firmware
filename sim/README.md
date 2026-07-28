@@ -17,6 +17,12 @@ Run one characteristic scenario for each documented mode:
 make sim-modes
 ```
 
+Run the clock-stop regression for generated repeats:
+
+```sh
+make sim-clock-stop
+```
+
 Print Break mode's preset rhythm table:
 
 ```sh
@@ -40,6 +46,7 @@ build/sim/idum-sim ball
 build/sim/idum-sim rotate
 build/sim/idum-sim delay
 build/sim/idum-sim break
+build/sim/idum-sim clock-stop-burst
 build/sim/idum-sim break-patterns
 build/sim/idum-sim break-playback
 build/sim/idum-sim skip

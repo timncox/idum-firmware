@@ -51,8 +51,74 @@ void errorChecking() {
     if (modifyLength4 < 0) modifyLength4 = 0;
   }
 
+  handleClockTimeout();
+
   startModification = startModification1 = startModification2 = startModification3 = startModification4 = 0;
   endModification = endModification1 = endModification2 = endModification3 = endModification4 = 0;  //reset some flags
+}
+
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+//End active generated-repeat modifications when the external clock is no longer arriving.
+//Without this, these modes can keep deriving pulses from the last measured interval forever.
+
+bool isClockTimeoutMode(unsigned int currentMode) {
+  return (currentMode == 1) || (currentMode == 2) || (currentMode == 6);
+}
+
+void handleClockTimeout() {
+
+  if (!modificationActive || (lastClockInterval == 0)) return;
+
+  unsigned long currentMicros = micros();
+  unsigned long clockTimeout = lastClockInterval * 2;
+
+  if (clockTimeout < 100000) clockTimeout = 100000;
+
+  if ((currentMicros - lastClockTime) <= clockTimeout) return;
+
+  if (isClockTimeoutMode(mode1)) {
+    modifyLength1 = 0;
+    trig1State = trig1In;
+    trig1Choke = 1;
+  }
+
+  if (isClockTimeoutMode(mode2)) {
+    modifyLength2 = 0;
+    trig2State = trig2In;
+    trig2Choke = 1;
+  }
+
+  if (isClockTimeoutMode(mode3)) {
+    modifyLength3 = 0;
+    trig3State = trig3In;
+    trig3Choke = 1;
+  }
+
+  if (isClockTimeoutMode(mode4)) {
+    modifyLength4 = 0;
+    trig4State = trig4In;
+    trig4Choke = 1;
+  }
+
+  if (isClockTimeoutMode(mode) || (mode == 7)) {
+    modifyLength = 0;
+    clockState = 0;
+    clockChoke = 1;
+  }
+
+  if (mode == 7) {
+    clockRatchet = 0;
+    clockSkip = 0;
+    clockRatchetState = 0;
+    clockRatchetStateOld = 0;
+    forceSkip = 0;
+  }
+
+  if ((modifyLength == 0) && (modifyLength1 == 0) && (modifyLength2 == 0) && (modifyLength3 == 0) && (modifyLength4 == 0)) {
+    modificationActive = 0;
+    carryOverActive = 0;
+  }
 }
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\

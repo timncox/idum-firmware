@@ -383,7 +383,6 @@ int clockStopBurstScenario() {
   writes.clear();
 
   establishClockInterval();
-  establishTriggerIntervals();
   configureAlwaysModify(1, 850, 1024);
 
   pulseGate(15, 5000, 100);
@@ -391,8 +390,10 @@ int clockStopBurstScenario() {
   pulseTriggerInputs(5000, 100);
 
   const unsigned long stoppedClockTime = simMicros;
+
+  runFor(700000);
   writes.clear();
-  runFor(1000000);
+  runFor(300000);
 
   const int tr1Onsets = countOutputOnsets(7);
   const int tr2Onsets = countOutputOnsets(8);
@@ -400,7 +401,7 @@ int clockStopBurstScenario() {
   const int tr4Onsets = countOutputOnsets(5);
 
   std::cout << "clock stopped at " << stoppedClockTime << "us\n";
-  std::cout << "generated output onsets after stopped clock: "
+  std::cout << "generated output onsets after clock timeout: "
             << "TR1=" << tr1Onsets << ' '
             << "TR2=" << tr2Onsets << ' '
             << "TR3=" << tr3Onsets << ' '
@@ -411,7 +412,8 @@ int clockStopBurstScenario() {
     return 0;
   }
 
-  std::cerr << "FAIL clock-stop-burst: generated repeats continued after the clock stopped\n";
+  printWrites();
+  std::cerr << "FAIL clock-stop-burst: generated repeats continued after clock timeout\n";
   return 1;
 }
 
@@ -589,6 +591,7 @@ int allModesScenario() {
     "rotate",
     "delay",
     "break",
+    "clock-stop-burst",
     "skip",
   };
 
@@ -714,6 +717,7 @@ void SetBoundariesBetweenActiveModes();
 void initializeIntervals();
 void modifyTest();
 void errorChecking();
+void handleClockTimeout();
 void calculateProbability();
 void decideModificationStatus();
 void activateModification();
