@@ -15,12 +15,12 @@ Observed module hardware:
 Use:
 
 ```sh
-arduino:megaavr:nona4809
+arduino:megaavr:nona4809:mode=off
 ```
 
-The plain Nano Every FQBN defaults to `mode=on`, enabling ATmega328 register emulation. IDUM's firmware pin numbers appear to depend on this mapping.
+This sets Nano Every register emulation to `None`, matching upstream build notes.
 
-Do not use `arduino:megaavr:nona4809:mode=off` for normal IDUM builds unless the pin map is audited and updated. It disables ATmega328 register emulation and can make the panel controls read the wrong pins.
+The plain `arduino:megaavr:nona4809` FQBN defaults to ATmega328 register emulation. Keep it as a diagnostic override only.
 
 ## Upload Method
 
@@ -41,7 +41,7 @@ make upload PORT=/dev/cu.usbmodem...
 
 ## Firmware Size Baseline
 
-With `arduino:megaavr:nona4809`, imported v0.99 builds at:
+With `arduino:megaavr:nona4809:mode=off`, imported v0.99 builds at:
 
 ```text
 Sketch uses 31689 bytes (64%) of program storage space. Maximum is 49152 bytes.

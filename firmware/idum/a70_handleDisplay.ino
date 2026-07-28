@@ -295,51 +295,7 @@ void calculateActiveLED() {
 void writeToModeMUX() {
 
   if (modeCounter != modeCounterOld) {  //only send the write commands when the active LED has changed
-    //display values for cd4051 driving mode display
-    switch (modeCounter) {
-
-      case 0:
-        digitalWriteFast(mode1LED, HIGH);
-        digitalWriteFast(mode2LED, LOW);
-        digitalWriteFast(mode3LED, LOW);
-        break;
-      case 1:
-        digitalWriteFast(mode1LED, LOW);
-        digitalWriteFast(mode2LED, HIGH);
-        digitalWriteFast(mode3LED, LOW);
-        break;
-      case 2:
-        digitalWriteFast(mode1LED, LOW);
-        digitalWriteFast(mode2LED, LOW);
-        digitalWriteFast(mode3LED, HIGH);
-        break;
-      case 3:
-        digitalWriteFast(mode1LED, LOW);
-        digitalWriteFast(mode2LED, HIGH);
-        digitalWriteFast(mode3LED, HIGH);
-        break;
-      case 4:
-        digitalWriteFast(mode1LED, HIGH);
-        digitalWriteFast(mode2LED, HIGH);
-        digitalWriteFast(mode3LED, HIGH);
-        break;
-      case 5:
-        digitalWriteFast(mode1LED, HIGH);
-        digitalWriteFast(mode2LED, LOW);
-        digitalWriteFast(mode3LED, HIGH);
-        break;
-      case 6:
-        digitalWriteFast(mode1LED, HIGH);
-        digitalWriteFast(mode2LED, HIGH);
-        digitalWriteFast(mode3LED, LOW);
-        break;
-      case 7:
-        digitalWriteFast(mode1LED, LOW);
-        digitalWriteFast(mode2LED, LOW);
-        digitalWriteFast(mode3LED, LOW);
-        break;
-      default: break;
-    }
+    writeModeLed(modeCounter);
   }
 
   modeCounterOld = modeCounter;  //remember the most recently active LED between function calls

@@ -20,6 +20,9 @@ EEPROMClass EEPROM;
 void setup();
 void loop();
 void adcDiagnosticLoop();
+void writeModeMuxAddress(unsigned int muxAddress);
+void writeModeLed(unsigned int ledIndex);
+void displayFirmwareVersion(unsigned int firmwareNumber);
 extern int breakBeat1[16][4][16];
 
 namespace {

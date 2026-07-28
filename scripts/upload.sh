@@ -8,7 +8,7 @@ fi
 
 ARDUINO_CLI="${ARDUINO_CLI:-arduino-cli}"
 ARDUINO_CONFIG="${ARDUINO_CONFIG:-arduino-cli.yaml}"
-FQBN="${FQBN:-arduino:megaavr:nona4809}"
+FQBN="${FQBN:-arduino:megaavr:nona4809:mode=off}"
 SKETCH="${SKETCH:-firmware/idum}"
 BUILD_PATH="${BUILD_PATH:-build/idum}"
 

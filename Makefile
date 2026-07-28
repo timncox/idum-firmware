@@ -1,6 +1,6 @@
 ARDUINO_CLI ?= arduino-cli
 ARDUINO_CONFIG ?= arduino-cli.yaml
-FQBN ?= arduino:megaavr:nona4809
+FQBN ?= arduino:megaavr:nona4809:mode=off
 SKETCH ?= firmware/idum
 BUILD_PATH ?= build/idum
 PORT ?=

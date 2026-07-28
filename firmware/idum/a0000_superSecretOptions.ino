@@ -70,3 +70,11 @@ unsigned long loopClockPulseWidth = 5000;            //default = 5ms for loop/ex
 unsigned int clockMultiplyWindow = 1000;             //default = 1ms window for x2/x4 clock tick detection
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+//Mode LED multiplexer mapping.
+//Your hardware was observed to light physical LEDs 7, 6, 4, 2, 1, 3, 5, 8 while sweeping logical modes 1-8.
+//This table maps logical display positions 1-8 back to the mux addresses that light physical LEDs 1-8.
+
+byte modeLedAddressMap[8] = { 4, 3, 5, 2, 6, 1, 0, 7 };
+
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\

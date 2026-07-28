@@ -66,12 +66,12 @@ void assignPins() {
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
-//Set the display multiplexer bits to display the current firmware number.
-//LEDs are not in ascending order so the bits are kind of strange for each LED.
+//Set the display multiplexer bits.  LEDs are not in ascending order on the PCB,
+//so display positions are translated through modeLedAddressMap.
 
-void displayFirmwareVersion(unsigned int firmwareNumber) {
+void writeModeMuxAddress(unsigned int muxAddress) {
 
-  switch (firmwareNumber) {
+  switch (muxAddress) {
 
     case 0:
       digitalWriteFast(mode1LED, HIGH);
@@ -115,6 +115,16 @@ void displayFirmwareVersion(unsigned int firmwareNumber) {
       break;
     default: break;
   }
+}
+
+void writeModeLed(unsigned int ledIndex) {
+  if (ledIndex > 7) ledIndex = 7;
+  writeModeMuxAddress(modeLedAddressMap[ledIndex]);
+}
+
+void displayFirmwareVersion(unsigned int firmwareNumber) {
+  if (firmwareNumber == 0) writeModeLed(0);
+  else writeModeLed(firmwareNumber - 1);
 }
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
