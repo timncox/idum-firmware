@@ -6,7 +6,7 @@
 
 void ball() {
 
-  if ((modifyLength > 0) && (mode == 3)) clockState = ((micros() - firstStepTime) < 10000);  // set the clock to make a trigger once at the start of the modification
+  if ((modifyLength > 0) && (mode == 3)) clockState = ((micros() - firstStepTime) < generatedClockPulseWidth);  // set the clock to make a trigger once at the start of the modification
 
   //check if each channel is performing the current modification
   if ((modifyLength1 > 0) && (mode1 == 3)) {

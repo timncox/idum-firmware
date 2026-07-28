@@ -40,10 +40,10 @@ void calculateLooperVariables() {
 
     //Here we multiply the clock with a modulo function.  The time since the last clock rising edge is wrapped by a division of the last
     //clock interval.  If the clock speed isn't changing this gives a pretty good multiplication of the clock.  We give a high output when
-    //the result of this calculation is less than 5000 for a 5 ms trigger to hopefully allow really fast clock multiplications.
+    //the result of this calculation is less than loopClockPulseWidth for a short trigger to hopefully allow really fast clock multiplications.
 
     unsigned long loopMultInterval = (loopRatchetAmount > 0) ? lastClockInterval / loopRatchetAmount : 0;
-    loopClockMult = pulseWithinInterval(currentMicros - lastClockTime, loopMultInterval, 5000);
+    loopClockMult = pulseWithinInterval(currentMicros - lastClockTime, loopMultInterval, loopClockPulseWidth);
 
   }
 
@@ -59,7 +59,7 @@ void calculateLooperVariables() {
     //if the "loop divide" counter is 0 it means that we have counted past a number of clocks detemined by the "ratchetamount" parameter and
     //wrapped back around to 0.  Then we use the second term to turn this into a trigger.
 
-    loopClockMult = (loopDivide == 0) && ((currentMicros - lastClockTime) < 5000);
+    loopClockMult = (loopDivide == 0) && ((currentMicros - lastClockTime) < loopClockPulseWidth);
   }
 
   //if the loop length is at its minimum and the param knob is at exactly noon we just turn off the looper clock to allow easy loop scrubbing.

@@ -210,29 +210,27 @@ void multiplyClocks() {
 
   unsigned long currentMicros = micros();  //calculating the current system time once per function is more efficient
 
-  unsigned int clockMultWindow = 1000;  //sets the global sensitivity for crossing a tick threshold.
-
   //Reset the rising edge variables every loop, these are set high if we hit a rising edge.
   times2ClockEdge = times4ClockEdge = 0;
 
   //A good example of the test we run, if the time since the most recent clock time is less than the clock window time then we are
   //in the first "tick" of the clock interval.
-  bool clockMultiplyTest1 = (currentMicros - lastClockTime) < clockMultWindow;
+  bool clockMultiplyTest1 = (currentMicros - lastClockTime) < clockMultiplyWindow;
 
   //If the time since the most recent clock time plus one quarter of the most recent clock interval is less than the clock window time
   //then we are in the second tick of the clock interval.
   bool clockMultiplyTest2 = ((currentMicros - lastClockTime) > (lastClockInterval / 4))
-                            && ((currentMicros - lastClockTime) < ((lastClockInterval / 4) + clockMultWindow));
+                            && ((currentMicros - lastClockTime) < ((lastClockInterval / 4) + clockMultiplyWindow));
 
   //If the time since the most recent clock time plus one hald of the most recent clock interval is less than the clock window time
   //then we are in the third tick of the clock interval.
   bool clockMultiplyTest3 = ((currentMicros - lastClockTime) > (lastClockInterval / 2))
-                            && ((currentMicros - lastClockTime) < ((lastClockInterval / 2) + clockMultWindow));
+                            && ((currentMicros - lastClockTime) < ((lastClockInterval / 2) + clockMultiplyWindow));
 
   //If the time since the most recent clock time plus three quarters of the most recent clock interval is less than the clock window time
   //then we are in the fourth tick of the clock interval.
   bool clockMultiplyTest4 = ((currentMicros - lastClockTime) > ((3 * lastClockInterval) / 4))
-                            && ((currentMicros - lastClockTime) < (((3 * lastClockInterval) / 4) + clockMultWindow));
+                            && ((currentMicros - lastClockTime) < (((3 * lastClockInterval) / 4) + clockMultiplyWindow));
 
   //The first and third clock ticks of the clock interval go twice as fast as the clock.  Tracking this variable lets us detect rising
   //clock edges at twice the speed of the clock.

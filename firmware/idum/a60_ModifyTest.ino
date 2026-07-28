@@ -71,9 +71,9 @@ void handleClockTimeout() {
   if (!modificationActive || (lastClockInterval == 0)) return;
 
   unsigned long currentMicros = micros();
-  unsigned long clockTimeout = lastClockInterval * 2;
+  unsigned long clockTimeout = lastClockInterval * clockStopTimeoutIntervals;
 
-  if (clockTimeout < 100000) clockTimeout = 100000;
+  if (clockTimeout < clockStopMinimumMicros) clockTimeout = clockStopMinimumMicros;
 
   if ((currentMicros - lastClockTime) <= clockTimeout) return;
 
@@ -127,8 +127,6 @@ void handleClockTimeout() {
 
 void calculateProbability() {
 
-  int probUpperThreshold = 1000;  //global variable to alter the dead zone where a modification will always happen.
-
   if (clockEdge) {  //at each clock edge
 
     //probability modifier makes it so that when the length is long it is less likely this test is less likely to go into another modifier right away.
@@ -145,17 +143,17 @@ void calculateProbability() {
     }
 
     //set the random value based on our random number generator and the probability modifier.
-    //this value maxes out at the upper threshold set by probUpperThreshold so if the probability slider is above that
+    //this value maxes out at the upper threshold set by probabilityUpperThreshold so if the probability slider is above that
     //value we always get a modification.
 
-    randomValue = min(random(probUpperThreshold) + (probabilityModifier * 90), probUpperThreshold);
+    randomValue = min(random(probabilityUpperThreshold) + (probabilityModifier * probabilityLengthPenalty), probabilityUpperThreshold);
 
     //Run the same test per channel in split mode.
     if (splitMode) {
-      randomValue1 = min(random(probUpperThreshold) + (probabilityModifier1 * 90), probUpperThreshold);
-      randomValue2 = min(random(probUpperThreshold) + (probabilityModifier2 * 90), probUpperThreshold);
-      randomValue3 = min(random(probUpperThreshold) + (probabilityModifier3 * 90), probUpperThreshold);
-      randomValue4 = min(random(probUpperThreshold) + (probabilityModifier4 * 90), probUpperThreshold);
+      randomValue1 = min(random(probabilityUpperThreshold) + (probabilityModifier1 * probabilityLengthPenalty), probabilityUpperThreshold);
+      randomValue2 = min(random(probabilityUpperThreshold) + (probabilityModifier2 * probabilityLengthPenalty), probabilityUpperThreshold);
+      randomValue3 = min(random(probabilityUpperThreshold) + (probabilityModifier3 * probabilityLengthPenalty), probabilityUpperThreshold);
+      randomValue4 = min(random(probabilityUpperThreshold) + (probabilityModifier4 * probabilityLengthPenalty), probabilityUpperThreshold);
     }
 
     //If we are not in split mode we usually just copy all relevant variables to the mode specific variables.  This makes saving things
@@ -208,8 +206,6 @@ void calculateProbability() {
 
 void decideModificationStatus() {
 
-  int probLowerThreshold = 15;  //global variable to alter the dead zone where a modification will never happen.
-
   //pressing the mode button quickly will turn off any active modifications
 
   if ((modeBtnFallingEdge) && modificationActive) {  //changed for split mode
@@ -237,27 +233,27 @@ void decideModificationStatus() {
 
   //runs the test to see if we are getting a modification on this step.
   //We need a clock edge, no active modification, our random value to be lower than the probability slider, the probability slider to be
-  //above 15probLowerThresholdnd for IDUM to be out of menu mode.  This gives probability sliders some dead zones at the top and bottom of travel.
+  //above probabilityLowerThreshold and for IDUM to be out of menu mode.
 
-  if ((clockEdge && (modifyLength == 0) && (randomValue < probRead) && (probRead > probLowerThreshold) && !menuMode)) {
+  if ((clockEdge && (modifyLength == 0) && (randomValue < probRead) && (probRead > probabilityLowerThreshold) && !menuMode)) {
     startModification = 1;  //if we pass the test set the startModification flag high
   }
 
   //In split mode we run this test per channel.  This is the active part that handles when modifications happen in split mode.
   if (splitMode) {
-    if ((clockEdge && (modifyLength1 == 0) && (randomValue1 < probRead) && (probRead > probLowerThreshold) && !menuMode)) {
+    if ((clockEdge && (modifyLength1 == 0) && (randomValue1 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode)) {
       startModification1 = 1;  //if we pass the test set the startModification flag high for this channel
     }
 
-    if ((clockEdge && (modifyLength2 == 0) && (randomValue2 < probRead) && (probRead > probLowerThreshold) && !menuMode)) {
+    if ((clockEdge && (modifyLength2 == 0) && (randomValue2 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode)) {
       startModification2 = 1;  //if we pass the test set the startModification flag high for this channel
     }
 
-    if ((clockEdge && (modifyLength3 == 0) && (randomValue3 < probRead) && (probRead > probLowerThreshold) && !menuMode)) {
+    if ((clockEdge && (modifyLength3 == 0) && (randomValue3 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode)) {
       startModification3 = 1;  //if we pass the test set the startModification flag high for this channel
     }
 
-    if ((clockEdge && (modifyLength4 == 0) && (randomValue4 < probRead) && (probRead > probLowerThreshold) && !menuMode)) {
+    if ((clockEdge && (modifyLength4 == 0) && (randomValue4 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode)) {
       startModification4 = 1;  //if we pass the test set the startModification flag high for this channel
     }
   }
@@ -544,8 +540,6 @@ void loopModificationHandler() {
 
   unsigned int modifyLengthTest = 0;  //temporary parameter to load variables from the paramHistory array
 
-  int probLowerThreshold = 15;  //global variable to alter the dead zone where a modification will never happen.
-
   //paramHistory [ trigg channel ] [ step ] [ param-to-save ( mode/ modifyParam/ modifyLength/ originalModifyLength ) ]
 
   //if we have changed the loop index for any reason we run a test to see if we should run modifications on any channels
@@ -557,7 +551,7 @@ void loopModificationHandler() {
       modifyLengthTest = paramHistory[0][loopIndex][2];
 
       //run a different version of the modifyTest using the stored looper and loop randomness parameters
-      if ((modifyLengthTest > 0) && (loopRandom < probRead) && (probRead > probLowerThreshold) && !menuMode) {
+      if ((modifyLengthTest > 0) && (loopRandom < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
 
         //If we pass the modification test we load all saved variables into the modification variables.
         mode = paramHistory[0][loopIndex][0];
@@ -606,7 +600,7 @@ void loopModificationHandler() {
       //this makes it so that we only run modifications on steps that actually had a modification recorded
       modifyLengthTest = paramHistory[0][loopIndex][2];
 
-      if ((modifyLengthTest >= 0) && (loopRandom < probRead) && (probRead > probLowerThreshold) && !menuMode) {
+      if ((modifyLengthTest >= 0) && (loopRandom < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
 
         mode = paramHistory[0][loopIndex][0];
         modifyParam = paramHistory[0][loopIndex][1];
@@ -633,7 +627,7 @@ void loopModificationHandler() {
 
       modifyLengthTest = paramHistory[1][loopIndex][2];  //this makes it so that we only run modifications on steps that actually had a modification recorded
 
-      if ((modifyLengthTest >= 0) && (loopRandom1 < probRead) && (probRead > probLowerThreshold) && !menuMode) {
+      if ((modifyLengthTest >= 0) && (loopRandom1 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
 
         mode1 = paramHistory[1][loopIndex][0];
         modifyParam1 = paramHistory[1][loopIndex][1];
@@ -660,7 +654,7 @@ void loopModificationHandler() {
 
       modifyLengthTest = paramHistory[2][loopIndex][2];  //this makes it so that we only run modifications on steps that actually had a modification recorded
 
-      if ((modifyLengthTest >= 0) && (loopRandom2 < probRead) && (probRead > probLowerThreshold) && !menuMode) {
+      if ((modifyLengthTest >= 0) && (loopRandom2 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
 
         mode2 = paramHistory[2][loopIndex][0];
         modifyParam2 = paramHistory[2][loopIndex][1];
@@ -687,7 +681,7 @@ void loopModificationHandler() {
 
       modifyLengthTest = paramHistory[3][loopIndex][2];  //this makes it so that we only run modifications on steps that actually had a modification recorded
 
-      if ((modifyLengthTest >= 0) && (loopRandom3 < probRead) && (probRead > probLowerThreshold) && !menuMode) {
+      if ((modifyLengthTest >= 0) && (loopRandom3 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
 
         mode3 = paramHistory[3][loopIndex][0];
         modifyParam3 = paramHistory[3][loopIndex][1];
@@ -714,7 +708,7 @@ void loopModificationHandler() {
 
       modifyLengthTest = paramHistory[4][loopIndex][2];  //this makes it so that we only run modifications on steps that actually had a modification recorded
 
-      if ((modifyLengthTest >= 0) && (loopRandom4 < probRead) && (probRead > probLowerThreshold) && !menuMode) {
+      if ((modifyLengthTest >= 0) && (loopRandom4 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
 
         mode4 = paramHistory[4][loopIndex][0];
         modifyParam4 = paramHistory[4][loopIndex][1];

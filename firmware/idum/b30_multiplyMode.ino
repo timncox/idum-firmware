@@ -13,7 +13,7 @@ void ratchet() {
   unsigned long scaledClockInterval3 = 0;
   unsigned long scaledClockInterval4 = 0;
 
-  if ((modifyLength > 0) && (mode == 2)) clockState = ((currentMicros - firstStepTime) < 10000);  // set the clock to make a trigger once at the start of the modification
+  if ((modifyLength > 0) && (mode == 2)) clockState = ((currentMicros - firstStepTime) < generatedClockPulseWidth);  // set the clock to make a trigger once at the start of the modification
 
   //check if each channel is performing the current modification
   if ((modifyLength1 > 0) && (mode1 == 2)) {
@@ -26,7 +26,7 @@ void ratchet() {
       //if we are on the left side of the param knob we divide the clock
       scaledClockInterval1 = lastTrig1Interval * ratchetAmount1;
 
-    trig1State = pulseWithinInterval(currentMicros - lastTrig1Time, scaledClockInterval1, 10000);
+    trig1State = pulseWithinInterval(currentMicros - lastTrig1Time, scaledClockInterval1, generatedTriggerPulseWidth);
   }
 
   //check if each channel is performing the current modification (I don't feel like copying all of the comments per channel)
@@ -37,7 +37,7 @@ void ratchet() {
     else
       scaledClockInterval2 = lastTrig2Interval * ratchetAmount2;
 
-    trig2State = pulseWithinInterval(currentMicros - lastTrig2Time, scaledClockInterval2, 10000);
+    trig2State = pulseWithinInterval(currentMicros - lastTrig2Time, scaledClockInterval2, generatedTriggerPulseWidth);
   }
 
   //check if each channel is performing the current modification
@@ -48,7 +48,7 @@ void ratchet() {
     else
       scaledClockInterval3 = lastTrig3Interval * ratchetAmount3;
 
-    trig3State = pulseWithinInterval(currentMicros - lastTrig3Time, scaledClockInterval3, 10000);
+    trig3State = pulseWithinInterval(currentMicros - lastTrig3Time, scaledClockInterval3, generatedTriggerPulseWidth);
   }
 
   //check if each channel is performing the current modification
@@ -59,7 +59,7 @@ void ratchet() {
     else
       scaledClockInterval4 = lastTrig4Interval * ratchetAmount4;
 
-    trig4State = pulseWithinInterval(currentMicros - lastTrig4Time, scaledClockInterval4, 10000);
+    trig4State = pulseWithinInterval(currentMicros - lastTrig4Time, scaledClockInterval4, generatedTriggerPulseWidth);
   }
 }
 

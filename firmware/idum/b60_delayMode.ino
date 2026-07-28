@@ -8,7 +8,7 @@ void trigDelay() {
 
   unsigned long currentMicros = micros();  //only sample the system time once
 
-  if ((modifyLength > 0) && (mode == 5)) clockState = ((currentMicros - firstStepTime) < 10000);  // set the clock to make a trigger once at the start of the modification
+  if ((modifyLength > 0) && (mode == 5)) clockState = ((currentMicros - firstStepTime) < generatedClockPulseWidth);  // set the clock to make a trigger once at the start of the modification
 
   //This is one of the more complex functions for calculating the trigger state
   //If the time elapsed since the last trigger input for each channel is longer than a certain ratio of the interval between the most recent

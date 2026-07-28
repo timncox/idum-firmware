@@ -9,7 +9,7 @@ void hold() {
   unsigned long currentMicros = micros();  //only sample the system time once
 
   // set the clock to make a trigger once at the start of the modification
-  if ((modifyLength > 0) && (mode == 0)) clockState = ((currentMicros - firstStepTime) < 10000);
+  if ((modifyLength > 0) && (mode == 0)) clockState = ((currentMicros - firstStepTime) < generatedClockPulseWidth);
 
   //If you saw this code before the split mode was added you will notice that things look quite different.  The fact that each channel can play
   //a different mode with hypothetically different parameter values (depending on freezeParam which was intended to work with split mode) means

@@ -15,7 +15,7 @@ void burst() {
   unsigned long scaledClockInterval4 = 0;
 
   // set the clock to make a trigger once at the start of the modification
-  if ((modifyLength > 0) && (mode == 1)) clockState = ((currentMicros - firstStepTime) < 10000);
+  if ((modifyLength > 0) && (mode == 1)) clockState = ((currentMicros - firstStepTime) < generatedClockPulseWidth);
 
   //run the modification code on each trigger channel if we the modify length for that channel is more than 0
   //and the mode for that channel is set to burst
@@ -39,7 +39,7 @@ void burst() {
     //This makes it so that we can split each clock cycle into an even number of subdivisions and detect the time since we passed one of those
     //subdivisions.  Then we set the trigger out high if we are within a certain period of time from one of those subdivisions.
 
-    trig1State = pulseWithinInterval(currentMicros - lastTrig1Time, scaledClockInterval1, 10000);  //bursted clocks are only 10 milliseconds long.  Should be
+    trig1State = pulseWithinInterval(currentMicros - lastTrig1Time, scaledClockInterval1, generatedTriggerPulseWidth);
     //changed at some point to allow a more dynamic trigger length depending on the clock time and burst ratchet speed.
   }
 
@@ -54,7 +54,7 @@ void burst() {
       scaledClockInterval2 = lastClockInterval * ratchetAmount2;
     }
 
-    trig2State = pulseWithinInterval(currentMicros - lastTrig2Time, scaledClockInterval2, 10000);  //(scaledClockInterval2 / 2);
+    trig2State = pulseWithinInterval(currentMicros - lastTrig2Time, scaledClockInterval2, generatedTriggerPulseWidth);  //(scaledClockInterval2 / 2);
   }
 
   //run the modification code on each trigger channel if we the modify length for that channel is more than 0
@@ -69,7 +69,7 @@ void burst() {
       scaledClockInterval3 = lastClockInterval * ratchetAmount3;
     }
 
-    trig3State = pulseWithinInterval(currentMicros - lastTrig3Time, scaledClockInterval3, 10000);
+    trig3State = pulseWithinInterval(currentMicros - lastTrig3Time, scaledClockInterval3, generatedTriggerPulseWidth);
   }
 
   //run the modification code on each trigger channel if we the modify length for that channel is more than 0
@@ -84,7 +84,7 @@ void burst() {
       scaledClockInterval4 = lastClockInterval * ratchetAmount4;
     }
 
-    trig4State = pulseWithinInterval(currentMicros - lastTrig4Time, scaledClockInterval4, 10000);
+    trig4State = pulseWithinInterval(currentMicros - lastTrig4Time, scaledClockInterval4, generatedTriggerPulseWidth);
   }
 }
 

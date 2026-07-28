@@ -41,3 +41,32 @@ bool freezeParam = 0;         //default = 0
 bool carryOverDisable = 0;    //default = 0
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+//Probability behavior.  Lowering probabilityLowerThreshold lets the bottom of the Chance slider produce tiny amounts of randomness.
+//A value of 0 means the fully-down slider is still off, but anything above zero can trigger a very rare modification.
+//probabilityLengthPenalty makes long modifications less likely to immediately retrigger.
+
+unsigned int probabilityLowerThreshold = 0;    //default IDUM v0.99 behavior was 15
+unsigned int probabilityUpperThreshold = 1000; //default = 1000
+unsigned int probabilityLengthPenalty = 90;    //default = 90
+
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+//Generated clock/ratchet behavior.
+//IDUM cannot know a clock has stopped until the next expected pulse does not arrive.  These values control how long generated-repeat modes
+//are allowed to keep running after the most recent clock before they release back to pass-through.
+
+unsigned int clockStopTimeoutIntervals = 2;          //default = 2 missed clock intervals
+unsigned long clockStopMinimumMicros = 100000;       //default = 100ms, mostly affects very fast clocks
+
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+//Generated output pulse widths.
+
+unsigned long generatedTriggerPulseWidth = 10000;    //default = 10ms for burst/ratchet trigger outputs
+unsigned long generatedClockPulseWidth = 10000;      //default = 10ms for one-shot clock outputs at modification start
+unsigned long breakTriggerPulseWidth = 5000;         //default = 5ms for Break mode trigger cells
+unsigned long loopClockPulseWidth = 5000;            //default = 5ms for loop/external sequencer clocking
+unsigned int clockMultiplyWindow = 1000;             //default = 1ms window for x2/x4 clock tick detection
+
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
