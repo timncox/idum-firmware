@@ -66,6 +66,25 @@ make sim-break-playback
 
 The simulator is useful for regression tests around timing-sensitive behavior, CV scaling, mode selection, clock-derived events, loop playback, and output inversion. It does not replace flashing the module for final validation, but it gives us a much faster place to iterate on behavior.
 
+## ADC Diagnostic Build
+
+To measure the physical analog range of the front-panel controls and CV inputs, build and flash the temporary ADC diagnostic firmware:
+
+```sh
+make adc-diagnostic-build
+make adc-diagnostic-upload PORT=/dev/cu.usbmodem101
+arduino-cli --config-file arduino-cli.yaml monitor -p /dev/cu.usbmodem101 -c baudrate=115200
+```
+
+The diagnostic prints `mode`, `chance`, `length`, and `param` values over USB about ten times per second, including the minimum and maximum values seen since boot. Move each control through its full travel to see the actual hardware range.
+
+This diagnostic firmware does not run IDUM's musical behavior. Flash the normal firmware again after measuring:
+
+```sh
+make build
+make upload PORT=/dev/cu.usbmodem101
+```
+
 ## Current Firmware Flow
 
 At a high level:

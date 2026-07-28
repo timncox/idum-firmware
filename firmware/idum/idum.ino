@@ -113,6 +113,10 @@
 #include <EEPROM.h>
 #include "arduino-timer.h"
 
+#ifndef IDUM_ADC_DIAGNOSTIC
+#define IDUM_ADC_DIAGNOSTIC 0
+#endif
+
 Timer<1, micros> dTimer;
 Timer<1, micros> cTimer;
 

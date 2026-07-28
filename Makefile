@@ -5,7 +5,7 @@ SKETCH ?= firmware/idum
 BUILD_PATH ?= build/idum
 PORT ?=
 
-.PHONY: help doctor setup build upload clean board-list sim sim-modes sim-clock-stop sim-break-patterns sim-break-playback sim-clean
+.PHONY: help doctor setup build upload adc-diagnostic-build adc-diagnostic-upload clean board-list sim sim-modes sim-clock-stop sim-break-patterns sim-break-playback sim-clean
 
 help:
 	@echo "IDUM firmware build targets"
@@ -13,6 +13,8 @@ help:
 	@echo "  make setup                Install/update the Arduino megaAVR core"
 	@echo "  make doctor               Check local command-line toolchain"
 	@echo "  make build                Compile firmware/idum for $(FQBN)"
+	@echo "  make adc-diagnostic-build Compile USB ADC diagnostic firmware"
+	@echo "  make adc-diagnostic-upload PORT=<port> Upload USB ADC diagnostic firmware"
 	@echo "  make sim                  Build and run the host-side simulator smoke test"
 	@echo "  make sim-modes            Build and run simulator scenarios for all modes"
 	@echo "  make sim-clock-stop       Run the clock-stop generated-repeat regression"
@@ -41,6 +43,13 @@ build:
 upload:
 	@if [ -z "$(PORT)" ]; then echo "Set PORT, for example: make upload PORT=/dev/cu.usbmodem101"; exit 2; fi
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) upload -p $(PORT) --fqbn $(FQBN) --input-dir $(BUILD_PATH) $(SKETCH)
+
+adc-diagnostic-build:
+	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) compile --fqbn $(FQBN) --build-path $(BUILD_PATH)-adc --build-property compiler.cpp.extra_flags="-DIDUM_ADC_DIAGNOSTIC=1" $(SKETCH)
+
+adc-diagnostic-upload:
+	@if [ -z "$(PORT)" ]; then echo "Set PORT, for example: make adc-diagnostic-upload PORT=/dev/cu.usbmodem101"; exit 2; fi
+	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) upload -p $(PORT) --fqbn $(FQBN) --input-dir $(BUILD_PATH)-adc $(SKETCH)
 
 board-list:
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) board list

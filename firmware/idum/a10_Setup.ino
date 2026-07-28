@@ -10,6 +10,10 @@ void setup() {
 
   displayFirmwareVersion(2);  //This displays on the mode ring which firmware is loaded on your IDUM.  Increase the number for each update.
 
+#if IDUM_ADC_DIAGNOSTIC
+  Serial.begin(115200);
+#endif
+
   if (printEnable) Serial.begin(9600);  //only setup the serial communication if printing is enabled.  Causes the MCU to work way slower.
 
   initializeEEPROM();  //check and read saved variables from before the last power down.

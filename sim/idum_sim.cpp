@@ -19,6 +19,7 @@ EEPROMClass EEPROM;
 
 void setup();
 void loop();
+void adcDiagnosticLoop();
 extern int breakBeat1[16][4][16];
 
 namespace {
@@ -761,6 +762,7 @@ void saveLoopData();
 #include "../firmware/idum/a0000_superSecretOptions.ino"
 #include "../firmware/idum/a00_Variables.ino"
 #include "../firmware/idum/a01_timers.ino"
+#include "../firmware/idum/a05_AdcDiagnostic.ino"
 #include "../firmware/idum/a10_Setup.ino"
 #include "../firmware/idum/a20_Loop.ino"
 #include "../firmware/idum/a30_ReadInputs.ino"

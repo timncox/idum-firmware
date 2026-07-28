@@ -6,6 +6,11 @@
 
 void loop() {
 
+#if IDUM_ADC_DIAGNOSTIC
+  adcDiagnosticLoop();
+  return;
+#endif
+
   //The timer interrupts need to be "ticked" by these functions.  I don't think that this library implements an actual hardware interrupt.
   cTimer.tick();  //used for the "slow clock" interval timers.
   dTimer.tick();  //used for the display interval timers.
