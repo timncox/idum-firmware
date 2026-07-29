@@ -38,7 +38,7 @@ void skip() {
     if (clockSkip) {                                    //if we are in the skip mode.
       if (clockEdge || forceSkip) {                     //and we received a rising clock at the input
         forceSkip = 0;                                  //forceSkip fixes a bug that prevented skips on the first step of a modification
-        skipSteps(skipRatchetAmount - (!analogClock));  //skip a certain number of steps based on the param knob position
+        skipSteps(skipRatchetAmount - (!fastExternalSequencerClock));  //skip a certain number of steps based on the param knob position
         clockSkipCycleCount += (skipRatchetAmount);     //keep track of how many steps we have skipped
         clockChoke = 0;                                 //normal clock output is disabled
         clockState = 0;                                 //and also turn off the actual clock state

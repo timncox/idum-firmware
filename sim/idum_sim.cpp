@@ -24,6 +24,14 @@ void writeModeMuxAddress(unsigned int muxAddress);
 void writeModeLed(unsigned int ledIndex);
 void displayFirmwareVersion(unsigned int firmwareNumber);
 extern int breakBeat1[16][4][16];
+extern bool analogClock;
+extern bool fastExternalSequencerClock;
+extern bool loopModulationMode;
+extern bool trigHistory[4][8][4];
+extern unsigned int historyIndex;
+extern unsigned int mode;
+extern unsigned int modeDialPosition;
+extern unsigned int modePosition;
 
 namespace {
 
@@ -411,6 +419,31 @@ int triggerRatchetDivideSteadyScenario() {
   }, "left-side PARAM changes a steady trigger stream", "expected divided ratchet mode to alter, not merely pass through, eight steady input triggers");
 }
 
+int loopModulationModeScenario() {
+  return runModeScenario("loop-modulation-mode", [] {
+    setModeCv(1);
+    runFor(20000);
+    const unsigned int latchedMode = mode;
+
+    setLogicalGate(17, true);
+    runFor(20000);
+
+    setModeCv(5);
+    runFor(20000);
+
+    const bool modeStayedLatched = (mode == latchedMode) && (modePosition == latchedMode);
+    const bool dialStillTracksControl = (modeDialPosition == 5);
+    const bool toggleRead = loopModulationMode;
+    const bool fastExternalClockDefault = fastExternalSequencerClock;
+
+    pulseGate(15, 5000, 100);
+    pulseGate(14, 5000, 100);
+    const bool recordingContinues = trigHistory[0][historyIndex][0];
+
+    return modeStayedLatched && dialStillTracksControl && toggleRead && fastExternalClockDefault && recordingContinues;
+  }, "front toggle gates mode mutation without freezing loop capture", "expected mode to latch, raw mode control to track, and rolling capture to continue");
+}
+
 int ballScenario() {
   return runModeScenario("ball", [] {
     establishClockInterval();
@@ -687,6 +720,7 @@ int allModesScenario() {
     "clock-ratchet-divide",
     "trigger-ratchet",
     "trigger-ratchet-divide",
+    "loop-modulation-mode",
     "ball",
     "rotate",
     "delay",
@@ -714,6 +748,7 @@ int runScenario(const std::string& name) {
   if (name == "trigger-ratchet") return triggerRatchetScenario();
   if (name == "trigger-ratchet-divide") return triggerRatchetDivideScenario();
   if (name == "trigger-ratchet-divide-steady") return triggerRatchetDivideSteadyScenario();
+  if (name == "loop-modulation-mode") return loopModulationModeScenario();
   if (name == "ratchet") return triggerRatchetScenario();
   if (name == "ball") return ballScenario();
   if (name == "rotate") return rotateScenario();
@@ -726,7 +761,7 @@ int runScenario(const std::string& name) {
   if (name == "all-modes") return allModesScenario();
 
   std::cerr << "Unknown scenario: " << name << '\n';
-  std::cerr << "Available scenarios: smoke, hold, clock-ratchet, clock-ratchet-divide, clock-ratchet-sparse-min-length, trigger-ratchet, trigger-ratchet-divide, trigger-ratchet-divide-steady, ball, rotate, delay, break, clock-stop-burst, break-patterns, break-playback, skip, all-modes\n";
+  std::cerr << "Available scenarios: smoke, hold, clock-ratchet, clock-ratchet-divide, clock-ratchet-sparse-min-length, trigger-ratchet, trigger-ratchet-divide, trigger-ratchet-divide-steady, loop-modulation-mode, ball, rotate, delay, break, clock-stop-burst, break-patterns, break-playback, skip, all-modes\n";
   return 2;
 }
 

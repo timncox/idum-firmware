@@ -454,6 +454,7 @@ unsigned int loopCycleCount = 0;
 ////////////////////////////////////////////////////////////follow stuff
 
 bool cycleIn = 0;
+bool loopModulationMode = 0;
 bool cycleActivate = 0;
 unsigned long cycleTimeStart = 0;
 unsigned long cycleTimeEnd = 0;

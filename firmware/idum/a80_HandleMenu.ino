@@ -22,6 +22,7 @@ void changeMenuOptions() {
     if (modeBtnFallingEdge && !menuModeReset) {  //and the mode button just fell a second time after we enabled the menu
       switch (menuPosition) {                    //change the option being pointed to by the mode dial
         case 0:
+          //Toggles external sequencer cycle/position maintenance. Clock manipulation speed is fixed by fastExternalSequencerClock.
           analogClock = !analogClock;
           break;
         case 1:

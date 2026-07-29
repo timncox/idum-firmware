@@ -42,6 +42,13 @@ bool carryOverDisable = 0;    //default = 0
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
+//External sequencer clock manipulation speed.
+//This fork assumes attached sequencers can handle IDUM's fast clock manipulation behavior.
+
+bool fastExternalSequencerClock = 1; //default = 1
+
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
 //Generated trigger carryover behavior.
 //Burst and Multiply/Divide can carry over from one modification window into the next. Re-arming chokes during carryover keeps a sparse
 //trigger from unlocking endless generated pulses when chance is high and length is short.

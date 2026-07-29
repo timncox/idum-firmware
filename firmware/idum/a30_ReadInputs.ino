@@ -28,7 +28,8 @@ void readGateInputs() {
   trig3In = !digitalReadFast(trig3Pin);
   trig4In = !digitalReadFast(trig4Pin);
 
-  cycleIn = !digitalReadFast(cycleSw);
+  loopModulationMode = !digitalReadFast(cycleSw);
+  cycleIn = analogClock;
   loopGateIn = !digitalReadFast(loopGate);
   loopButtonIn = !digitalReadFast(loopButton);
 

@@ -114,11 +114,11 @@ void sendIndexClocks() {
   if (loopIndex != loopIndexOld) {  //if the loop index has changed
 
     if (loopIndex > loopIndexOld) {  //if the index has increased step forward by the change in looper index
-      skipSteps(loopIndex - loopIndexOld - !analogClock);
+      skipSteps(loopIndex - loopIndexOld - !fastExternalSequencerClock);
     }
 
     else {
-      skipSteps(8 - (loopIndexOld - loopIndex) - !analogClock);  //if the index has decreased step backward by the change in looper index
+      skipSteps(8 - (loopIndexOld - loopIndex) - !fastExternalSequencerClock);  //if the index has decreased step backward by the change in looper index
     }
   }
 }

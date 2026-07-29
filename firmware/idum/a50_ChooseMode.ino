@@ -46,7 +46,7 @@ void checkCurrentModes() {
   }
 
   //If the mode button has just been released and we aren't in the menu mode then we flip whether the current mode is active.
-  if (modeBtnFallingEdge && !menuMode && !menuModeReset && !loopEnable) {
+  if (modeBtnFallingEdge && !menuMode && !menuModeReset && !loopEnable && !loopModulationMode) {
     activeModes[modeDialPosition] = !activeModes[modeDialPosition];
 
     //next we check to make sure that there is at least one mode active or else the dang thing crashes.
@@ -140,6 +140,7 @@ unsigned int selectCurrentMode() {
 
     //If our raw ADC input for the Mode knob is between both boundaries we save our current index as the selected mode and exit the loop.
     if ((bottomBound <= modeRead) && (modeRead < topBound)) {
+      if (loopModulationMode) break;
       modePosition = intervals[i].mode;
       break;
     }
@@ -148,7 +149,7 @@ unsigned int selectCurrentMode() {
   //we don't always update the actual mode with the dial position even though we do the calculation for every loop.  This is because the mode doesn't change
   //during a modification but we still want to calculated the mode to remember the most recent value for the hysteresis calculations.
 
-  if ((modificationActive == 0) && !menuMode) {  //if no modification is being done update the selected mode and mode display
+  if ((modificationActive == 0) && !menuMode && !loopModulationMode) {  //if no modification is being done update the selected mode and mode display
 
     mode = modePosition;
   }

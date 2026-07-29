@@ -8,7 +8,7 @@ void setup() {
 
   assignPins();  //Set input and output status of pins.
 
-  displayFirmwareVersion(3);  //This displays on the mode ring which firmware is loaded on your IDUM.  Increase the number for each update.
+  displayFirmwareVersion(4);  //This displays on the mode ring which firmware is loaded on your IDUM.  Increase the number for each update.
 
 #if IDUM_ADC_DIAGNOSTIC
   Serial.begin(115200);

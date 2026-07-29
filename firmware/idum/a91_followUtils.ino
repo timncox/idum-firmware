@@ -84,7 +84,7 @@ void loopCycle() {
     }
 
     //If we are in the slow clock speed decrease the cycle length by 1
-    if (!analogClock && (cycleNumSteps > 0)) cycleNumSteps -= 1;
+    if (!fastExternalSequencerClock && (cycleNumSteps > 0)) cycleNumSteps -= 1;
 
     if (cycleNumSteps > 0) {     //if we are on a different step than we are supposed to be on
       skipSteps(cycleNumSteps);  //skip steps until we have caught up.
@@ -103,7 +103,7 @@ void loopCycle() {
 
 void skipSteps(unsigned int numSkips) {
 
-  if (analogClock) {               //if we are in the faster clock speed
+  if (fastExternalSequencerClock) { //if we are in the faster clock speed
     digitalWrite(clockOut, HIGH);  //make absolutely sure that the clock output is low
     digitalWrite(clockOut, HIGH);
     digitalWrite(clockOut, HIGH);
