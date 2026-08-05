@@ -115,6 +115,10 @@ bool trig1Choke = 0;
 bool trig2Choke = 0;
 bool trig3Choke = 0;
 bool trig4Choke = 0;
+bool rotate1Choke = 0;
+bool rotate2Choke = 0;
+bool rotate3Choke = 0;
+bool rotate4Choke = 0;
 
 ////////////////////////////////////////////////////////////////////CV input variables
 
@@ -146,6 +150,7 @@ bool splitMode = 0;     //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 //////////////////////////////////////////////////////////////////////mode stuff
 
 unsigned int randomValue = 0;
+bool rngSeeded = 0;
 unsigned int testIndex = 0;
 unsigned int modeCounter = 0;
 unsigned int modeCounterOld = 0;
@@ -293,7 +298,7 @@ bool forceBounce4 = 0;
 //'1' triggers a ratchet on that step.  Also worth mentioning that these sequences run at twice the resolution
 //of the incoming clock so think of every two steps being one clock.
 
-int breakBeat1[16][4][16] =
+const int breakBeat1[16][4][16] =
 //////X  -  -  -  X  -  -  -  0  -  -  -  X  -  -  - |   <<<< This helps a lot for writing the patterns
 { { { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, // Bassdrum   - Pattern 0
     { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, // Snare      - Pattern 0
@@ -429,15 +434,15 @@ bool loopTrig2Old = 0;
 bool loopTrig3Old = 0;
 bool loopTrig4Old = 0;
 
-bool forceTrig1LoopRecord = 0;
-bool forceTrig2LoopRecord = 0;
-bool forceTrig3LoopRecord = 0;
-bool forceTrig4LoopRecord = 0;
+volatile bool forceTrig1LoopRecord = 0;
+volatile bool forceTrig2LoopRecord = 0;
+volatile bool forceTrig3LoopRecord = 0;
+volatile bool forceTrig4LoopRecord = 0;
 
-unsigned long forceTrig1LoopRecordTime = 0;
-unsigned long forceTrig2LoopRecordTime = 0;
-unsigned long forceTrig3LoopRecordTime = 0;
-unsigned long forceTrig4LoopRecordTime = 0;
+volatile unsigned long forceTrig1LoopRecordTime = 0;
+volatile unsigned long forceTrig2LoopRecordTime = 0;
+volatile unsigned long forceTrig3LoopRecordTime = 0;
+volatile unsigned long forceTrig4LoopRecordTime = 0;
 
 unsigned long loopButtonTime = 0;
 bool loopButtonActive = 0;

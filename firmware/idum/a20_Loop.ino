@@ -19,6 +19,8 @@ void loop() {
 
   edgeDetect();  //sets the edge detection variables
 
+  seedRNGOnFirstClock();  //the first clock arrival supplies the strongest startup entropy
+
   chooseMode();  //choose the current modification mode
 
   handleLooper();  //Either play saved loop gate data or record incoming gate data to the looper.

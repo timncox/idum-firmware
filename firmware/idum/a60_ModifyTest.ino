@@ -22,6 +22,12 @@ void modifyTest() {
 
     activateModification();  //set a bunch of variables when we do activate a modification
 
+    //A length-1 carryover briefly reaches zero in calculateProbability(), then
+    //activateModification() renews it. Settle the aggregate flag after that
+    //renewal so the mode still runs on the clock edge it belongs to.
+    modificationActive = (modifyLength > 0) || (modifyLength1 > 0) || (modifyLength2 > 0)
+                         || (modifyLength3 > 0) || (modifyLength4 > 0);
+
   }
 
   else loopModificationHandler();  //we now have a function that more accurately determines modification status when we are in a loop.
@@ -265,8 +271,7 @@ void decideModificationStatus() {
   //carryover indicates if we are going straight into another modification at the end of a previous modification
 
   if (startModification && endModification) {  //if both the start and end flags are on at the same time
-    carryOver = 1;                             //we set the carryover flag high
-    chooseMode();                              //we need to run the choose mode function again because this doesn't run during an active modification.
+    carryOver = 1;  //we set the carryover flag high
   }
 
   else carryOver = 0;  //otherwise we set the carryover flag low
@@ -310,6 +315,11 @@ void decideModificationStatus() {
   if (endModification && ((originalModifyLength > 1) || (mode == 7)) && !loopEnable && cycleIn) {
     maintainCycle();
   }
+
+  //chooseMode() deliberately does not update mode while a modification is
+  //active. For a non-split carryover, modePosition already contains the live
+  //dial selection, so commit it after cycle maintenance has used the old mode.
+  if (carryOver && !splitMode) mode = modePosition;
 
   //If we are running a modification on any channel then we set a flag high to make it easy to test.  Before we just checked that the modifyLength
   //parameter was above 0 for the main modification.  Now it needs to be done for all channels and this flag makes it easier to detect.
@@ -555,9 +565,24 @@ void activateModification() {
 //about currently running modifications into the looper making it reflect the recorded behavior much more accurately.  This made adding a loop
 //modification specific function make a lot more sense.
 
+unsigned int ratchetAmountFromParam(unsigned int unscaledValue) {
+  if (unscaledValue > 15) unscaledValue = 15;
+
+  switch (paramResolution) {
+    case 0: return odd[unscaledValue];
+    case 1: return even[unscaledValue];
+    case 2: return powerOf2[unscaledValue];
+    default: return odd[unscaledValue];
+  }
+}
+
 void loopModificationHandler() {
 
   unsigned int modifyLengthTest = 0;  //temporary parameter to load variables from the paramHistory array
+
+  //Gates are read from the rolling buffer with this absolute offset. Read the
+  //modification captured beside each gate from the same address.
+  unsigned int loopReadIndex = (loopIndex + originalHistoryIndex) % 8;
 
   //paramHistory [ trigg channel ] [ step ] [ param-to-save ( mode/ modifyParam/ modifyLength/ originalModifyLength ) ]
 
@@ -567,16 +592,16 @@ void loopModificationHandler() {
     if (!splitMode) {  //un-split mode is faster to calculate so we do it first
 
       //we grab the recorded 'modifyLength' param to only run modifications on steps that actually had a modification recorded
-      modifyLengthTest = paramHistory[0][loopIndex][2];
+      modifyLengthTest = paramHistory[0][loopReadIndex][2];
 
       //run a different version of the modifyTest using the stored looper and loop randomness parameters
       if ((modifyLengthTest > 0) && (loopRandom < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
 
         //If we pass the modification test we load all saved variables into the modification variables.
-        mode = paramHistory[0][loopIndex][0];
-        modifyParam = paramHistory[0][loopIndex][1];
+        mode = paramHistory[0][loopReadIndex][0];
+        modifyParam = paramHistory[0][loopReadIndex][1];
         modifyLength = modifyLengthTest;
-        originalModifyLength = paramHistory[0][loopIndex][3];
+        originalModifyLength = paramHistory[0][loopReadIndex][3];
 
         //We need to calculate some of these variables again per modification, we simply replace the global variables as they have
         //already been used in any relevant functions and from here on out in the code will only be used for modifications.
@@ -585,18 +610,7 @@ void loopModificationHandler() {
         //Super based scaling of the modifyParam variable.  We don't need to add the hysteresis since this is only saved once per clock.
         unscaledParam = modifyParam / 64;
 
-        switch (paramResolution) {
-          case 0:
-            //many modes with a ratchet speed are mirrored on both sides of the knob and therefor only use values between 1 - 8.
-            ratchetAmount = (unscaledParam % 8) + 1;
-            break;
-          case 1:
-            ratchetAmount = even[unscaledParam % 8];
-            break;
-          case 2:
-            ratchetAmount = powerOf2[unscaledParam % 8];
-            break;
-        }
+        ratchetAmount = ratchetAmountFromParam(unscaledParam);
       }
 
       else modifyLength = 0;  //turns off the modification for all channels if the test comes back negative
@@ -617,137 +631,82 @@ void loopModificationHandler() {
     else {
 
       //this makes it so that we only run modifications on steps that actually had a modification recorded
-      modifyLengthTest = paramHistory[0][loopIndex][2];
+      modifyLengthTest = paramHistory[0][loopReadIndex][2];
 
-      if ((modifyLengthTest >= 0) && (loopRandom < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
+      if ((modifyLengthTest > 0) && (loopRandom < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
 
-        mode = paramHistory[0][loopIndex][0];
-        modifyParam = paramHistory[0][loopIndex][1];
+        mode = paramHistory[0][loopReadIndex][0];
+        modifyParam = paramHistory[0][loopReadIndex][1];
         modifyLength = modifyLengthTest;
-        originalModifyLength = paramHistory[0][loopIndex][3];
+        originalModifyLength = paramHistory[0][loopReadIndex][3];
 
         //some mode specific variables
         unscaledParam = modifyParam / 64;
-        switch (paramResolution) {
-          case 0:
-            //many modes with a ratchet speed are mirrored on both sides of the knob and therefor only use values between 1 - 8.
-            ratchetAmount = (unscaledParam % 8) + 1;
-            break;
-          case 1:
-            ratchetAmount = even[unscaledParam % 8];
-            break;
-          case 2:
-            ratchetAmount = powerOf2[unscaledParam % 8];
-            break;
-        }
+        ratchetAmount = ratchetAmountFromParam(unscaledParam);
       }
 
       else modifyLength = 0;  //turns off modification just for this channel
 
-      modifyLengthTest = paramHistory[1][loopIndex][2];  //this makes it so that we only run modifications on steps that actually had a modification recorded
+      modifyLengthTest = paramHistory[1][loopReadIndex][2];  //this makes it so that we only run modifications on steps that actually had a modification recorded
 
-      if ((modifyLengthTest >= 0) && (loopRandom1 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
+      if ((modifyLengthTest > 0) && (loopRandom1 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
 
-        mode1 = paramHistory[1][loopIndex][0];
-        modifyParam1 = paramHistory[1][loopIndex][1];
+        mode1 = paramHistory[1][loopReadIndex][0];
+        modifyParam1 = paramHistory[1][loopReadIndex][1];
         modifyLength1 = modifyLengthTest;
-        originalModifyLength1 = paramHistory[1][loopIndex][3];
+        originalModifyLength1 = paramHistory[1][loopReadIndex][3];
 
         //some mode specific variables
         unscaledParam1 = modifyParam1 / 64;
-        switch (paramResolution) {
-          case 0:
-            //many modes with a ratchet speed are mirrored on both sides of the knob and therefor only use values between 1 - 8.
-            ratchetAmount1 = (unscaledParam1 % 8) + 1;
-            break;
-          case 1:
-            ratchetAmount1 = even[unscaledParam1 % 8];
-            break;
-          case 2:
-            ratchetAmount1 = powerOf2[unscaledParam1 % 8];
-            break;
-        }
+        ratchetAmount1 = ratchetAmountFromParam(unscaledParam1);
       }
 
       else modifyLength1 = 0;  //turns off modification just for this channel
 
-      modifyLengthTest = paramHistory[2][loopIndex][2];  //this makes it so that we only run modifications on steps that actually had a modification recorded
+      modifyLengthTest = paramHistory[2][loopReadIndex][2];  //this makes it so that we only run modifications on steps that actually had a modification recorded
 
-      if ((modifyLengthTest >= 0) && (loopRandom2 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
+      if ((modifyLengthTest > 0) && (loopRandom2 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
 
-        mode2 = paramHistory[2][loopIndex][0];
-        modifyParam2 = paramHistory[2][loopIndex][1];
+        mode2 = paramHistory[2][loopReadIndex][0];
+        modifyParam2 = paramHistory[2][loopReadIndex][1];
         modifyLength2 = modifyLengthTest;
-        originalModifyLength2 = paramHistory[2][loopIndex][3];
+        originalModifyLength2 = paramHistory[2][loopReadIndex][3];
 
         //some mode specific variables
         unscaledParam2 = modifyParam2 / 64;
-        switch (paramResolution) {
-          case 0:
-            //many modes with a ratchet speed are mirrored on both sides of the knob and therefor only use values between 1 - 8.
-            ratchetAmount2 = (unscaledParam2 % 8) + 1;
-            break;
-          case 1:
-            ratchetAmount2 = even[unscaledParam2 % 8];
-            break;
-          case 2:
-            ratchetAmount2 = powerOf2[unscaledParam2 % 8];
-            break;
-        }
+        ratchetAmount2 = ratchetAmountFromParam(unscaledParam2);
       }
 
       else modifyLength2 = 0;  //turns off modification just for this channel
 
-      modifyLengthTest = paramHistory[3][loopIndex][2];  //this makes it so that we only run modifications on steps that actually had a modification recorded
+      modifyLengthTest = paramHistory[3][loopReadIndex][2];  //this makes it so that we only run modifications on steps that actually had a modification recorded
 
-      if ((modifyLengthTest >= 0) && (loopRandom3 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
+      if ((modifyLengthTest > 0) && (loopRandom3 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
 
-        mode3 = paramHistory[3][loopIndex][0];
-        modifyParam3 = paramHistory[3][loopIndex][1];
+        mode3 = paramHistory[3][loopReadIndex][0];
+        modifyParam3 = paramHistory[3][loopReadIndex][1];
         modifyLength3 = modifyLengthTest;
-        originalModifyLength3 = paramHistory[3][loopIndex][3];
+        originalModifyLength3 = paramHistory[3][loopReadIndex][3];
 
         //some mode specific variables
         unscaledParam3 = modifyParam3 / 64;
-        switch (paramResolution) {
-          case 0:
-            //many modes with a ratchet speed are mirrored on both sides of the knob and therefor only use values between 1 - 8.
-            ratchetAmount3 = (unscaledParam3 % 8) + 1;
-            break;
-          case 1:
-            ratchetAmount3 = even[unscaledParam3 % 8];
-            break;
-          case 2:
-            ratchetAmount3 = powerOf2[unscaledParam3 % 8];
-            break;
-        }
+        ratchetAmount3 = ratchetAmountFromParam(unscaledParam3);
       }
 
       else modifyLength3 = 0;  //turns off modification just for this channel
 
-      modifyLengthTest = paramHistory[4][loopIndex][2];  //this makes it so that we only run modifications on steps that actually had a modification recorded
+      modifyLengthTest = paramHistory[4][loopReadIndex][2];  //this makes it so that we only run modifications on steps that actually had a modification recorded
 
-      if ((modifyLengthTest >= 0) && (loopRandom4 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
+      if ((modifyLengthTest > 0) && (loopRandom4 < probRead) && (probRead > probabilityLowerThreshold) && !menuMode) {
 
-        mode4 = paramHistory[4][loopIndex][0];
-        modifyParam4 = paramHistory[4][loopIndex][1];
+        mode4 = paramHistory[4][loopReadIndex][0];
+        modifyParam4 = paramHistory[4][loopReadIndex][1];
         modifyLength4 = modifyLengthTest;
-        originalModifyLength4 = paramHistory[4][loopIndex][3];
+        originalModifyLength4 = paramHistory[4][loopReadIndex][3];
 
         //some mode specific variables
         unscaledParam4 = modifyParam4 / 64;
-        switch (paramResolution) {
-          case 0:
-            //many modes with a ratchet speed are mirrored on both sides of the knob and therefor only use values between 1 - 8.
-            ratchetAmount4 = (unscaledParam4 % 8) + 1;
-            break;
-          case 1:
-            ratchetAmount4 = even[unscaledParam4 % 8];
-            break;
-          case 2:
-            ratchetAmount4 = powerOf2[unscaledParam4 % 8];
-            break;
-        }
+        ratchetAmount4 = ratchetAmountFromParam(unscaledParam4);
       }
 
       else modifyLength4 = 0;  //turns off modification just for this channel

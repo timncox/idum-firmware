@@ -17,6 +17,13 @@ Run one characteristic scenario for each documented mode:
 make sim-modes
 ```
 
+Run the faithful bug-fix regression suite against this fork only—no module or
+external source checkout required:
+
+```sh
+make sim-regressions
+```
+
 Run the clock-stop regression for generated repeats:
 
 ```sh
@@ -34,6 +41,17 @@ Recreate Break mode's preset rhythms through simulated clock and trigger I/O:
 ```sh
 make sim-break-playback
 ```
+
+Compare stock v.99, this fork, and ID00M's claimed faithful bug fixes using
+an extracted copy of the public ID00M source repository:
+
+```sh
+make sim-id00m-regressions ID00M_ROOT=/path/to/id00m
+```
+
+The comparison stages both external firmware trees in a temporary directory
+and overlays only the simulator's desktop fast-I/O shim. It does not modify the
+stock or ID00M sources.
 
 Or run the simulator binary directly:
 

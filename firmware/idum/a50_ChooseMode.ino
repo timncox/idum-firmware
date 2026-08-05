@@ -83,8 +83,13 @@ unsigned int calculateCustomBoundary(unsigned int leftModeIndex, unsigned int ri
 void calculateModeBoundaries() {
   intervalCount = 0;
 
-  // First pass: Erase existing interval settings:
-  initializeIntervals();
+  // First pass: clear the live interval array. initializeIntervals() operates
+  // on an older parallel array that selectCurrentMode() does not read.
+  for (int i = 0; i < 8; ++i) {
+    intervals[i].left = 0;
+    intervals[i].right = 0;
+    intervals[i].mode = 0;
+  }
 
   // Second pass: for each active mode add it to the next available interval:
   for (int i = 0; i < 8; ++i) {
@@ -133,10 +138,15 @@ unsigned int selectCurrentMode() {
 
     //finds the closest boundary to the left of the current mode knob position.  Adds a bit to each boundary when our for loop index 'i' is
     //equal to the most recently selected mode for hysteresis/ reducing jitter.
-    bottomBound = intervals[i].left + ((modePosition == (i - 1)) * 20) + ((modePosition == i) * -20);
+    long bottomCalc = (long)intervals[i].left + ((modePosition == (i - 1)) * 20) + ((modePosition == i) * -20);
 
     //does the same test but for the closest right boundary.
-    topBound = intervals[i].right + ((modePosition == i) * 20) + (modePosition == (i + 1) * -20);
+    long topCalc = (long)intervals[i].right + ((modePosition == i) * 20) + (modePosition == (i + 1) * -20);
+
+    //The -20 hysteresis nudge can cross zero at the first interval. Clamp in
+    //signed arithmetic instead of wrapping an unsigned bound near 65535.
+    bottomBound = (bottomCalc < 0) ? 0 : bottomCalc;
+    topBound = (topCalc < 0) ? 0 : topCalc;
 
     //If our raw ADC input for the Mode knob is between both boundaries we save our current index as the selected mode and exit the loop.
     if ((bottomBound <= modeRead) && (modeRead < topBound)) {

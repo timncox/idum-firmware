@@ -81,6 +81,13 @@ void storeCurrentTriggersOnClockEdge() {
 //A somewhat imperfect solution for more accurate trigger recording.  In the next firmware update the input triggers will drive everything
 //using external interrupts to make all trigger input timings more accurate.
 
+unsigned long atomicReadULong(volatile unsigned long *value) {
+  noInterrupts();
+  unsigned long snapshot = *value;
+  interrupts();
+  return snapshot;
+}
+
 void storeTrigInterruptsInLoop() {
 
   unsigned int currentTick = 0;
@@ -89,7 +96,7 @@ void storeTrigInterruptsInLoop() {
   if (forceTrig1LoopRecord) {
 
     //calculate the tick that the trigger interrupt happened in based on the recorded time.
-    currentTick = decideTickRecord(forceTrig1LoopRecordTime);
+    currentTick = decideTickRecord(atomicReadULong(&forceTrig1LoopRecordTime));
 
     //If the returned tick value is within expected parameters store a trigger in the looper at the calculated tick value.
     if ((currentTick > 0) && (currentTick < 4)) trigHistory[0][historyIndex][currentTick] = 1;  //error checking
@@ -100,21 +107,21 @@ void storeTrigInterruptsInLoop() {
 
   if (forceTrig2LoopRecord) {
 
-    currentTick = decideTickRecord(forceTrig2LoopRecordTime);
+    currentTick = decideTickRecord(atomicReadULong(&forceTrig2LoopRecordTime));
     if ((currentTick > 0) && (currentTick < 4)) trigHistory[1][historyIndex][currentTick] = 1;
     if (currentTick < 4) forceTrig2LoopRecord = 0;
   }
 
   if (forceTrig3LoopRecord) {
 
-    currentTick = decideTickRecord(forceTrig3LoopRecordTime);
+    currentTick = decideTickRecord(atomicReadULong(&forceTrig3LoopRecordTime));
     if ((currentTick > 0) && (currentTick < 4)) trigHistory[2][historyIndex][currentTick] = 1;
     if (currentTick < 4) forceTrig3LoopRecord = 0;
   }
 
   if (forceTrig4LoopRecord) {
 
-    currentTick = decideTickRecord(forceTrig4LoopRecordTime);
+    currentTick = decideTickRecord(atomicReadULong(&forceTrig4LoopRecordTime));
     if ((currentTick > 0) && (currentTick < 4)) trigHistory[3][historyIndex][currentTick] = 1;
     if (currentTick < 4) forceTrig4LoopRecord = 0;
   }

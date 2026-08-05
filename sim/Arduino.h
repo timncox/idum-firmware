@@ -52,6 +52,7 @@ auto max(T a, U b) -> decltype(a > b ? a : b) {
 unsigned long micros();
 unsigned long millis();
 void delay(unsigned long ms);
+void delayMicroseconds(unsigned int us);
 
 void pinMode(uint8_t pin, uint8_t mode);
 int digitalRead(uint8_t pin);
@@ -61,6 +62,9 @@ void attachInterrupt(uint8_t pin, void (*handler)(), int mode);
 
 long random(long max);
 long random(long min, long max);
+void randomSeed(unsigned long seed);
+void noInterrupts();
+void interrupts();
 
 struct SerialStub {
   void begin(unsigned long) {}

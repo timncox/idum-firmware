@@ -104,6 +104,11 @@ void outputGates() {
 
   if (loopEnable) clockState = 0;  //if the looper is active the clock outputs are written to directly from the loop function
 
+  bool output1Choke = ((modifyLength1 > 0) && (mode1 == 4)) ? rotate1Choke : trig1Choke;
+  bool output2Choke = ((modifyLength2 > 0) && (mode2 == 4)) ? rotate2Choke : trig2Choke;
+  bool output3Choke = ((modifyLength3 > 0) && (mode3 == 4)) ? rotate3Choke : trig3Choke;
+  bool output4Choke = ((modifyLength4 > 0) && (mode4 == 4)) ? rotate4Choke : trig4Choke;
+
   if (!cycleActive) {  //if we aren't in the middle of a slow cycle maintain loop
     if (clockState) {  //write to the clock digital output based on the calculated "clockstate" variable
       if (clockChoke)
@@ -114,25 +119,25 @@ void outputGates() {
     }
   }
 
-  if (trig1State && trig1Choke) {     //for all other outputs turning the clock choke off means that the output should stay off
+  if (trig1State && output1Choke) {   //for all other outputs turning the clock choke off means that the output should stay off
     digitalWriteFast(trig1Out, LOW);  //write to each trigger output based on the calculated 'trigXState' variables
   } else {
     digitalWriteFast(trig1Out, HIGH);  //again outputs are inverted in hardware so we write the opposite of the state variable
   }
 
-  if (trig2State && trig2Choke) {
+  if (trig2State && output2Choke) {
     digitalWriteFast(trig2Out, LOW);
   } else {
     digitalWriteFast(trig2Out, HIGH);
   }
 
-  if (trig3State && trig3Choke) {
+  if (trig3State && output3Choke) {
     digitalWriteFast(trig3Out, LOW);
   } else {
     digitalWriteFast(trig3Out, HIGH);
   }
 
-  if (trig4State && trig4Choke) {
+  if (trig4State && output4Choke) {
     digitalWriteFast(trig4Out, LOW);
   } else {
     digitalWriteFast(trig4Out, HIGH);

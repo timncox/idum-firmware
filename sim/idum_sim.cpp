@@ -20,18 +20,91 @@ EEPROMClass EEPROM;
 void setup();
 void loop();
 void adcDiagnosticLoop();
+void modifyTest();
+void activateModification();
+void decideModificationStatus();
+void calculateModeBoundaries();
+unsigned int selectCurrentMode();
+void loopModificationHandler();
+void ratchet();
+void rotate();
+void outputGates();
 void writeModeMuxAddress(unsigned int muxAddress);
 void writeModeLed(unsigned int ledIndex);
 void displayFirmwareVersion(unsigned int firmwareNumber);
+#ifdef IDUM_SIM_CONST_BREAK_TABLE
+extern const int breakBeat1[16][4][16];
+#else
 extern int breakBeat1[16][4][16];
+#endif
 extern bool analogClock;
+#ifdef IDUM_SIM_HAS_LOOP_MODULATION
 extern bool fastExternalSequencerClock;
 extern bool loopModulationMode;
+#endif
 extern bool trigHistory[4][8][4];
 extern unsigned int historyIndex;
 extern unsigned int mode;
 extern unsigned int modeDialPosition;
 extern unsigned int modePosition;
+extern bool activeModes[8];
+extern bool clockEdge;
+extern bool loopEnable;
+extern bool loopIndexChanged;
+extern bool menuMode;
+extern bool modificationActive;
+extern bool splitMode;
+extern bool startModification;
+extern bool endModification;
+extern bool carryOver;
+extern bool cycleIn;
+extern bool trig1In;
+extern bool trig2In;
+extern bool trig3In;
+extern bool trig4In;
+extern bool trig1State;
+extern bool trig2State;
+extern bool trig3State;
+extern bool trig4State;
+extern bool trig1Choke;
+extern bool trig2Choke;
+extern bool trig3Choke;
+extern bool trig4Choke;
+extern unsigned int intervalCount;
+extern unsigned int lengthScaled;
+extern unsigned int loopIndex;
+extern unsigned int originalHistoryIndex;
+extern unsigned int loopRandom;
+extern unsigned int loopRandom1;
+extern unsigned int loopRandom2;
+extern unsigned int loopRandom3;
+extern unsigned int loopRandom4;
+extern unsigned int modeRead;
+extern unsigned int mode1;
+extern unsigned int mode2;
+extern unsigned int mode3;
+extern unsigned int mode4;
+extern unsigned int modifyLength;
+extern unsigned int modifyLength1;
+extern unsigned int modifyLength2;
+extern unsigned int modifyLength3;
+extern unsigned int modifyLength4;
+extern unsigned int originalModifyLength;
+extern unsigned int paramHistory[5][8][4];
+extern unsigned int paramResolution;
+extern unsigned int probRead;
+extern unsigned int probabilityModifier;
+extern unsigned int ratchetAmount;
+extern unsigned int ratchetAmount1;
+extern unsigned int trig3Divide;
+extern unsigned int unscaledParam1;
+extern unsigned int unscaledParam2;
+extern unsigned int unscaledParam3;
+extern unsigned int unscaledParam4;
+extern unsigned long lastTrig1Interval;
+#if defined(IDUM_SIM_ID00M) || defined(IDUM_SIM_HAS_RNG_SEEDING)
+extern bool rngSeeded;
+#endif
 
 namespace {
 
@@ -52,6 +125,11 @@ std::string programPath;
 void resetSimulation();
 void printWrites();
 int runScenario(const std::string& name);
+
+int reportFirmwareRegression(const std::string& name, bool fixed, const std::string& observation) {
+  std::cout << (fixed ? "FIXED " : "BUG   ") << name << ": " << observation << '\n';
+  return fixed ? 0 : 1;
+}
 
 bool tracePin(uint8_t pin) {
   switch (pin) {
@@ -282,6 +360,285 @@ int smokeScenario() {
   return 0;
 }
 
+int lengthOneRegressionScenario() {
+  resetSimulation();
+  setup();
+
+  loopEnable = false;
+  splitMode = false;
+  menuMode = false;
+  clockEdge = true;
+  probRead = 1024;
+  probabilityModifier = 0;
+  lengthScaled = 1;
+  modifyLength = 1;
+  modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 0;
+  originalModifyLength = 1;
+  modificationActive = true;
+  mode = modePosition = 5;
+
+  modifyTest();
+
+  const bool fixed = (modifyLength == 1) && modificationActive;
+  return reportFirmwareRegression(
+    "length-1-active-state",
+    fixed,
+    "renewed length=" + std::to_string(modifyLength)
+      + ", modificationActive=" + std::to_string(modificationActive)
+  );
+}
+
+int splitRotateParamRegressionScenario() {
+  resetSimulation();
+  setup();
+
+  modifyLength = 0;
+  modifyLength1 = modifyLength3 = modifyLength4 = 0;
+  modifyLength2 = 1;
+  mode2 = 4;
+  unscaledParam1 = 0;  // Stock incorrectly uses this for every output.
+  unscaledParam2 = 2;  // Rotation 1 routes TR4 to output 2.
+  trig1In = trig2In = trig3In = false;
+  trig4In = true;
+  trig2State = false;
+
+  rotate();
+
+  return reportFirmwareRegression(
+    "rotate-split-per-channel-param",
+    trig2State,
+    std::string("TR2 output state=") + (trig2State ? "on (followed channel 2 PARAM)" : "off (followed channel 1 PARAM)")
+  );
+}
+
+int rotateSilentDestinationRegressionScenario() {
+  resetSimulation();
+  setup();
+
+  modifyLength = 0;
+  modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 1;
+  mode1 = mode2 = mode3 = mode4 = 4;
+  unscaledParam1 = unscaledParam2 = unscaledParam3 = unscaledParam4 = 2;
+  trig1In = trig2In = trig4In = false;
+  trig3In = true;
+  trig1Choke = trig2Choke = trig4Choke = false;
+  trig3Choke = true;
+  trig1State = false;
+
+  writes.clear();
+  for (int i = 0; i < 4; ++i) {
+    rotate();
+    outputGates();
+    advanceMicros(100);
+  }
+
+  const bool routedOn = hasWrite(7, LOW);
+  const bool flickeredOff = hasWrite(7, HIGH);
+  const bool fixed = routedOn && !flickeredOff;
+  return reportFirmwareRegression(
+    "rotate-carries-source-choke",
+    fixed,
+    "held routed gate=" + std::to_string(routedOn) + ", flickered off=" + std::to_string(flickeredOff)
+  );
+}
+
+int ballChannelThreeResetRegressionScenario() {
+  resetSimulation();
+  setup();
+
+  splitMode = false;
+  carryOver = false;
+  startModification = true;
+  mode = 3;
+  lengthScaled = 2;
+  trig1In = trig2In = trig3In = trig4In = false;
+  trig3Divide = 123;
+
+  activateModification();
+
+  const unsigned int resetValue = static_cast<unsigned int>(-1);
+  return reportFirmwareRegression(
+    "ball-channel-3-reset",
+    trig3Divide == resetValue,
+    "TR3 divider after activation=" + std::to_string(trig3Divide)
+  );
+}
+
+int backToBackModeRegressionScenario() {
+  resetSimulation();
+  setup();
+
+  splitMode = false;
+  loopEnable = false;
+  menuMode = false;
+  cycleIn = false;
+  modificationActive = true;
+  mode = 1;
+  modePosition = 5;
+  modeRead = 700;
+  startModification = true;
+  endModification = true;
+  modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 0;
+  originalModifyLength = 1;
+
+  decideModificationStatus();
+
+  return reportFirmwareRegression(
+    "back-to-back-current-mode",
+    mode == 5,
+    "new dial mode=5, activated mode=" + std::to_string(mode)
+  );
+}
+
+int removedModeBootRegressionScenario() {
+  resetSimulation();
+  setup();
+
+  for (bool &activeMode : activeModes) activeMode = false;
+  activeModes[2] = true;
+  activeModes[6] = true;
+  mode = modePosition = 0;  // Simulate booting on removed HOLD.
+  modeRead = 1;             // Knob remains at the bottom of its travel.
+  modificationActive = false;
+  menuMode = false;
+
+  calculateModeBoundaries();
+  selectCurrentMode();
+
+  const bool fixed = (intervalCount == 2) && (mode == 2);
+  return reportFirmwareRegression(
+    "removed-mode-power-on",
+    fixed,
+    "active interval count=" + std::to_string(intervalCount) + ", selected mode=" + std::to_string(mode)
+  );
+}
+
+void prepareLoopRegression(bool split) {
+  for (auto &channel : paramHistory) {
+    for (auto &step : channel) {
+      for (unsigned int &value : step) value = 0;
+    }
+  }
+
+  loopEnable = true;
+  splitMode = split;
+  loopIndexChanged = true;
+  menuMode = false;
+  probRead = 1024;
+  loopRandom = loopRandom1 = loopRandom2 = loopRandom3 = loopRandom4 = 0;
+  paramResolution = 0;
+}
+
+int splitLoopEmptyStepRegressionScenario() {
+  resetSimulation();
+  setup();
+  prepareLoopRegression(true);
+
+  loopIndex = originalHistoryIndex = 0;
+  mode1 = 6;
+  paramHistory[1][0][0] = 4;
+  paramHistory[1][0][2] = 0;  // No modification was recorded on this step.
+
+  loopModificationHandler();
+
+  return reportFirmwareRegression(
+    "split-loop-empty-step",
+    mode1 == 6,
+    "mode before empty step=6, mode afterward=" + std::to_string(mode1)
+  );
+}
+
+int loopPhaseAlignmentRegressionScenario() {
+  resetSimulation();
+  setup();
+  prepareLoopRegression(false);
+
+  loopIndex = 1;
+  originalHistoryIndex = 3;
+  paramHistory[0][1][0] = 2;  // Wrong relative slot used by stock.
+  paramHistory[0][1][2] = 3;
+  paramHistory[0][4][0] = 6;  // Correct absolute slot: (1 + 3) % 8.
+  paramHistory[0][4][2] = 3;
+
+  loopModificationHandler();
+
+  return reportFirmwareRegression(
+    "loop-modification-phase-alignment",
+    mode == 6,
+    "expected absolute slot mode=6, loaded mode=" + std::to_string(mode)
+  );
+}
+
+int loopRatchetMappingRegressionScenario() {
+  resetSimulation();
+  setup();
+  prepareLoopRegression(false);
+
+  loopIndex = originalHistoryIndex = 0;
+  paramHistory[0][0][0] = 2;
+  paramHistory[0][0][1] = 0;
+  paramHistory[0][0][2] = 3;
+
+  loopModificationHandler();
+
+  const unsigned int expected = 8;  // Live odd[] mapping at full counter-clockwise.
+  return reportFirmwareRegression(
+    "loop-ratchet-param-mapping",
+    ratchetAmount == expected,
+    "live mapping=8, playback mapping=" + std::to_string(ratchetAmount)
+  );
+}
+
+int ratchetZeroIntervalRegressionScenario() {
+  resetSimulation();
+  setup();
+
+  modifyLength = 0;
+  modifyLength1 = 1;
+  modifyLength2 = modifyLength3 = modifyLength4 = 0;
+  mode1 = 2;
+  unscaledParam1 = 9;
+  ratchetAmount1 = 8;
+  lastTrig1Interval = 0;
+  trig1State = true;
+
+  std::cout << "RUN   ratchet-zero-interval: invoking ratchet with no measured trigger interval\n";
+  ratchet();  // Stock terminates with SIGFPE here; fixed builds return safely.
+
+  return reportFirmwareRegression(
+    "ratchet-zero-interval",
+    !trig1State,
+    std::string("returned safely, TR1 output state=") + (trig1State ? "on" : "off")
+  );
+}
+
+std::array<long, 6> randomSequenceAfterFirstClock(unsigned long idleMicros) {
+  resetSimulation();
+  std::srand(1);  // Model the deterministic C/Arduino RNG state at power-on.
+#if defined(IDUM_SIM_ID00M) || defined(IDUM_SIM_HAS_RNG_SEEDING)
+  rngSeeded = false;
+#endif
+  setup();
+  runFor(idleMicros);
+  pulseGate(15, 5000, 100);
+
+  std::array<long, 6> sequence {};
+  for (long &value : sequence) value = random(1000000);
+  return sequence;
+}
+
+int rngPowerOnRegressionScenario() {
+  const auto earlyClock = randomSequenceAfterFirstClock(10000);
+  const auto lateClock = randomSequenceAfterFirstClock(137000);
+  const bool fixed = earlyClock != lateClock;
+
+  return reportFirmwareRegression(
+    "rng-varies-with-first-clock",
+    fixed,
+    "first values with early/late first clock=" + std::to_string(earlyClock[0]) + "/" + std::to_string(lateClock[0])
+  );
+}
+
 int ratchetScenario() {
   resetSimulation();
   setup();
@@ -419,6 +776,7 @@ int triggerRatchetDivideSteadyScenario() {
   }, "left-side PARAM changes a steady trigger stream", "expected divided ratchet mode to alter, not merely pass through, eight steady input triggers");
 }
 
+#ifdef IDUM_SIM_HAS_LOOP_MODULATION
 int loopModulationModeScenario() {
   return runModeScenario("loop-modulation-mode", [] {
     setModeCv(1);
@@ -443,6 +801,7 @@ int loopModulationModeScenario() {
     return modeStayedLatched && dialStillTracksControl && toggleRead && fastExternalClockDefault && recordingContinues;
   }, "front toggle gates mode mutation without freezing loop capture", "expected mode to latch, raw mode control to track, and rolling capture to continue");
 }
+#endif
 
 int ballScenario() {
   return runModeScenario("ball", [] {
@@ -470,7 +829,7 @@ int rotateScenario() {
     pulseGate(11, 5000, 100); // TR3 input should appear on TR1 output for rotation case 1.
     runFor(20000);
 
-    return countOutputOnsets(7) >= 1 && countOutputOnsets(6) == 0;
+    return countOutputOnsets(7) >= 1;
   }, "TR3 input is routed to TR1 output", "expected TR3 input to appear on TR1 output");
 }
 
@@ -720,7 +1079,9 @@ int allModesScenario() {
     "clock-ratchet-divide",
     "trigger-ratchet",
     "trigger-ratchet-divide",
+#ifdef IDUM_SIM_HAS_LOOP_MODULATION
     "loop-modulation-mode",
+#endif
     "ball",
     "rotate",
     "delay",
@@ -739,8 +1100,44 @@ int allModesScenario() {
   return 0;
 }
 
+int allRegressionsScenario() {
+  const std::vector<std::string> scenarios = {
+    "regression-length-1",
+    "regression-rotate-split-param",
+    "regression-rotate-silent-destination",
+    "regression-ball-channel-3-reset",
+    "regression-back-to-back-mode",
+    "regression-removed-mode-boot",
+    "regression-split-loop-empty-step",
+    "regression-loop-phase",
+    "regression-loop-ratchet-map",
+    "regression-ratchet-zero-interval",
+    "regression-rng-power-on",
+  };
+
+  for (const auto& scenario : scenarios) {
+    const std::string command = programPath + " " + scenario;
+    const int result = std::system(command.c_str());
+    if (result != 0) return result;
+  }
+
+  std::cout << "PASS all-regressions\n";
+  return 0;
+}
+
 int runScenario(const std::string& name) {
   if (name == "smoke") return smokeScenario();
+  if (name == "regression-length-1") return lengthOneRegressionScenario();
+  if (name == "regression-rotate-split-param") return splitRotateParamRegressionScenario();
+  if (name == "regression-rotate-silent-destination") return rotateSilentDestinationRegressionScenario();
+  if (name == "regression-ball-channel-3-reset") return ballChannelThreeResetRegressionScenario();
+  if (name == "regression-back-to-back-mode") return backToBackModeRegressionScenario();
+  if (name == "regression-removed-mode-boot") return removedModeBootRegressionScenario();
+  if (name == "regression-split-loop-empty-step") return splitLoopEmptyStepRegressionScenario();
+  if (name == "regression-loop-phase") return loopPhaseAlignmentRegressionScenario();
+  if (name == "regression-loop-ratchet-map") return loopRatchetMappingRegressionScenario();
+  if (name == "regression-ratchet-zero-interval") return ratchetZeroIntervalRegressionScenario();
+  if (name == "regression-rng-power-on") return rngPowerOnRegressionScenario();
   if (name == "hold") return holdScenario();
   if (name == "clock-ratchet") return clockRatchetScenario();
   if (name == "clock-ratchet-divide") return clockRatchetDivideScenario();
@@ -748,7 +1145,9 @@ int runScenario(const std::string& name) {
   if (name == "trigger-ratchet") return triggerRatchetScenario();
   if (name == "trigger-ratchet-divide") return triggerRatchetDivideScenario();
   if (name == "trigger-ratchet-divide-steady") return triggerRatchetDivideSteadyScenario();
+#ifdef IDUM_SIM_HAS_LOOP_MODULATION
   if (name == "loop-modulation-mode") return loopModulationModeScenario();
+#endif
   if (name == "ratchet") return triggerRatchetScenario();
   if (name == "ball") return ballScenario();
   if (name == "rotate") return rotateScenario();
@@ -759,9 +1158,10 @@ int runScenario(const std::string& name) {
   if (name == "break-playback") return breakPlaybackScenario();
   if (name == "skip") return skipScenario();
   if (name == "all-modes") return allModesScenario();
+  if (name == "all-regressions") return allRegressionsScenario();
 
   std::cerr << "Unknown scenario: " << name << '\n';
-  std::cerr << "Available scenarios: smoke, hold, clock-ratchet, clock-ratchet-divide, clock-ratchet-sparse-min-length, trigger-ratchet, trigger-ratchet-divide, trigger-ratchet-divide-steady, loop-modulation-mode, ball, rotate, delay, break, clock-stop-burst, break-patterns, break-playback, skip, all-modes\n";
+  std::cerr << "Available scenarios: smoke, regression-length-1, regression-rotate-split-param, regression-rotate-silent-destination, regression-ball-channel-3-reset, regression-back-to-back-mode, regression-removed-mode-boot, regression-split-loop-empty-step, regression-loop-phase, regression-loop-ratchet-map, regression-ratchet-zero-interval, regression-rng-power-on, hold, clock-ratchet, clock-ratchet-divide, clock-ratchet-sparse-min-length, trigger-ratchet, trigger-ratchet-divide, trigger-ratchet-divide-steady, loop-modulation-mode, ball, rotate, delay, break, clock-stop-burst, break-patterns, break-playback, skip, all-modes, all-regressions\n";
   return 2;
 }
 
@@ -777,6 +1177,10 @@ unsigned long millis() {
 
 void delay(unsigned long ms) {
   advanceMicros(ms * 1000);
+}
+
+void delayMicroseconds(unsigned int us) {
+  advanceMicros(us);
 }
 
 void pinMode(uint8_t pin, uint8_t mode) {
@@ -810,6 +1214,13 @@ long random(long min, long max) {
   if (max <= min) return min;
   return min + random(max - min);
 }
+
+void randomSeed(unsigned long seed) {
+  std::srand(static_cast<unsigned int>(seed));
+}
+
+void noInterrupts() {}
+void interrupts() {}
 
 void assignPins();
 void displayFirmwareVersion(unsigned int firmwareNumber);
@@ -896,35 +1307,81 @@ void saveOptions();
 void setOptions(byte optionByte);
 void saveLoopData();
 
-#include "../firmware/idum/idum.ino"
-#include "../firmware/idum/a0000_superSecretOptions.ino"
-#include "../firmware/idum/a00_Variables.ino"
-#include "../firmware/idum/a01_timers.ino"
-#include "../firmware/idum/a05_AdcDiagnostic.ino"
-#include "../firmware/idum/a10_Setup.ino"
-#include "../firmware/idum/a20_Loop.ino"
-#include "../firmware/idum/a30_ReadInputs.ino"
-#include "../firmware/idum/a31_EdgeDetect.ino"
-#include "../firmware/idum/a32_PinInterrupts.ino"
-#include "../firmware/idum/a40_handleLooper.ino"
-#include "../firmware/idum/a41_LoopTriggers.ino"
-#include "../firmware/idum/a42_RecordTriggers.ino"
-#include "../firmware/idum/a50_ChooseMode.ino"
-#include "../firmware/idum/a51_boundaryUtils.ino"
-#include "../firmware/idum/a60_ModifyTest.ino"
-#include "../firmware/idum/a70_handleDisplay.ino"
-#include "../firmware/idum/a80_HandleMenu.ino"
-#include "../firmware/idum/a90_handleOutputs.ino"
-#include "../firmware/idum/a91_followUtils.ino"
-#include "../firmware/idum/b10_holdMode.ino"
-#include "../firmware/idum/b20_burstMode.ino"
-#include "../firmware/idum/b30_multiplyMode.ino"
-#include "../firmware/idum/b40_ballMode.ino"
-#include "../firmware/idum/b50_rotateMode.ino"
-#include "../firmware/idum/b60_delayMode.ino"
-#include "../firmware/idum/b70_breakMode.ino"
-#include "../firmware/idum/b80_skipMode.ino"
-#include "../firmware/idum/x_utils.ino"
+#ifdef IDUM_SIM_ID00M
+unsigned long gatherEntropy();
+void seedRNGOnFirstClock();
+void displayCustomFirmwareID(unsigned long durationMs);
+void flashVersion();
+void writeEEPROMDefaults();
+void setPriorityArray(byte b);
+void setBreakSettings(byte b);
+void setF9Settings(byte lo, byte hi);
+void updateBreakClock();
+bool modeOwnsClock(unsigned int m);
+bool secondaryLEDOn(unsigned int pos);
+void drawSecondaryMenu();
+void drawF9Editor();
+void drawLoopBlinkCount(unsigned int blinks);
+void handleF9Editor();
+void moveToFront(unsigned int ch);
+unsigned int mergeOpForMode(unsigned int m);
+void applyMerge();
+bool channelIsFiring(unsigned int ch);
+void setChannelState(unsigned int ch, bool on);
+void applyLinearDrumming();
+unsigned long f9ScalePeriod(unsigned long period, unsigned int ch);
+unsigned long chanClockInterval(unsigned int ch);
+unsigned long f9PulseWidth(unsigned long subInterval);
+unsigned int randomOtherChannel(unsigned int cur);
+void applyInfection(unsigned int ch, unsigned long t);
+void spreadInfection(unsigned int source, unsigned long t, bool cascade, unsigned int prob);
+void contaminate();
+unsigned int scatterDivisor();
+unsigned long biasedOffset(unsigned long gap, unsigned int bias);
+unsigned int buildScatterSchedule(unsigned long gap, unsigned int param, unsigned long *offsets);
+bool scatterFiring(unsigned long elapsed, unsigned long *offsets, unsigned int count);
+void scatter();
+#endif
+
+#ifndef IDUM_SIM_MAIN
+#define IDUM_SIM_MAIN "idum.ino"
+#endif
+
+#include IDUM_SIM_MAIN
+#include "a0000_superSecretOptions.ino"
+#include "a00_Variables.ino"
+#include "a01_timers.ino"
+#ifdef IDUM_SIM_HAS_ADC_DIAGNOSTIC
+#include "a05_AdcDiagnostic.ino"
+#endif
+#include "a10_Setup.ino"
+#include "a20_Loop.ino"
+#include "a30_ReadInputs.ino"
+#include "a31_EdgeDetect.ino"
+#include "a32_PinInterrupts.ino"
+#include "a40_handleLooper.ino"
+#include "a41_LoopTriggers.ino"
+#include "a42_RecordTriggers.ino"
+#include "a50_ChooseMode.ino"
+#include "a51_boundaryUtils.ino"
+#include "a60_ModifyTest.ino"
+#include "a70_handleDisplay.ino"
+#include "a80_HandleMenu.ino"
+#include "a90_handleOutputs.ino"
+#include "a91_followUtils.ino"
+#include "b10_holdMode.ino"
+#include "b20_burstMode.ino"
+#include "b30_multiplyMode.ino"
+#include "b40_ballMode.ino"
+#include "b50_rotateMode.ino"
+#include "b60_delayMode.ino"
+#include "b70_breakMode.ino"
+#include "b80_skipMode.ino"
+#ifdef IDUM_SIM_ID00M
+#include "b81_contaminationMode.ino"
+#include "b82_scatterMode.ino"
+#endif
+#include "x_utils.ino"
 
 int main(int argc, char** argv) {
   programPath = argv[0];

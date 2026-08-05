@@ -1,8 +1,8 @@
-//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 // GREEN LED mode that scrambles each input and output
-//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
 void rotate() {
 
@@ -13,297 +13,46 @@ void rotate() {
 
   if ((modifyLength > 0) && (mode == 4)) clockState = ((micros() - firstStepTime) < generatedClockPulseWidth);  // set the clock to make a trigger once at the start of the modification
 
-  //check if each channel is performing the current modification
+  //Each row describes which input feeds one output for rotation positions 0-7.
+  //Keeping the permutation in one table prevents the four channel copies from
+  //silently drifting apart.
+  static const unsigned int rotateSource[4][8] = {
+    { 1, 3, 4, 2, 1, 4, 3, 2 },
+    { 3, 4, 3, 1, 2, 1, 4, 3 },
+    { 2, 1, 2, 4, 3, 2, 1, 4 },
+    { 4, 2, 1, 3, 4, 3, 2, 1 },
+  };
+
+  //ROTATE routes a real input gate, so its choke must travel with the source
+  //gate. Otherwise a silent destination remains muted even when a live source
+  //is routed to it. Keep routed output chokes separate: feeding them back into
+  //trigNChoke would permute the source-latch state again on every loop pass.
+  bool inputs[4] = { trig1In, trig2In, trig3In, trig4In };
+  bool chokes[4] = { trig1Choke, trig2Choke, trig3Choke, trig4Choke };
+
   if ((modifyLength1 > 0) && (mode1 == 4)) {
-    switch (rotation1) {  //we now switch the rotation variable per channel, this is probably the most channel dependent of all modifications
-      case 0:
-        {
-          trig1State = trig1In;
-          break;
-        }
-
-      case 1:
-        {
-          trig1State = trig3In;
-          break;
-        }
-
-      case 2:
-        {
-          trig1State = trig4In;
-          break;
-        }
-
-      case 3:
-        {
-          trig1State = trig2In;
-          break;
-        }
-
-      case 4:
-        {
-          trig1State = trig1In;
-          break;
-        }
-
-      case 5:
-        {
-          trig1State = trig4In;
-          break;
-        }
-
-      case 6:
-        {
-          trig1State = trig3In;
-          break;
-        }
-
-      case 7:
-        {
-          trig1State = trig2In;
-          break;
-        }
-
-      default: break;
-    }
+    unsigned int source = rotateSource[0][rotation1] - 1;
+    trig1State = inputs[source];
+    rotate1Choke = chokes[source];
   }
 
-  //check if each channel is performing the current modification
   if ((modifyLength2 > 0) && (mode2 == 4)) {
-    switch (rotation1) {
-      case 0:
-        {
-          trig2State = trig3In;
-          break;
-        }
-
-      case 1:
-        {
-          trig2State = trig4In;
-          break;
-        }
-
-      case 2:
-        {
-          trig2State = trig3In;
-          break;
-        }
-
-      case 3:
-        {
-          trig2State = trig1In;
-          break;
-        }
-
-      case 4:
-        {
-          trig2State = trig2In;
-          break;
-        }
-
-      case 5:
-        {
-          trig2State = trig1In;
-          break;
-        }
-
-      case 6:
-        {
-          trig2State = trig4In;
-          break;
-        }
-
-      case 7:
-        {
-          trig2State = trig3In;
-          break;
-        }
-
-      default: break;
-    }
+    unsigned int source = rotateSource[1][rotation2] - 1;
+    trig2State = inputs[source];
+    rotate2Choke = chokes[source];
   }
 
-  //check if each channel is performing the current modification
   if ((modifyLength3 > 0) && (mode3 == 4)) {
-    switch (rotation1) {
-      case 0:
-        {
-          trig3State = trig2In;
-          break;
-        }
-
-      case 1:
-        {
-          trig3State = trig1In;
-          break;
-        }
-
-      case 2:
-        {
-          trig3State = trig2In;
-          break;
-        }
-
-      case 3:
-        {
-          trig3State = trig4In;
-          break;
-        }
-
-      case 4:
-        {
-          trig3State = trig3In;
-          break;
-        }
-
-      case 5:
-        {
-          trig3State = trig2In;
-          break;
-        }
-
-      case 6:
-        {
-          trig3State = trig1In;
-          break;
-        }
-
-      case 7:
-        {
-          trig3State = trig4In;
-          break;
-        }
-
-      default: break;
-    }
+    unsigned int source = rotateSource[2][rotation3] - 1;
+    trig3State = inputs[source];
+    rotate3Choke = chokes[source];
   }
 
-  //check if each channel is performing the current modification
   if ((modifyLength4 > 0) && (mode4 == 4)) {
-    switch (rotation1) {
-      case 0:
-        {
-          trig4State = trig4In;
-          break;
-        }
-
-      case 1:
-        {
-          trig4State = trig2In;
-          break;
-        }
-
-      case 2:
-        {
-          trig4State = trig1In;
-          break;
-        }
-
-      case 3:
-        {
-          trig4State = trig3In;
-          break;
-        }
-
-      case 4:
-        {
-          trig4State = trig4In;
-          break;
-        }
-
-      case 5:
-        {
-          trig4State = trig3In;
-          break;
-        }
-
-      case 6:
-        {
-          trig4State = trig2In;
-          break;
-        }
-
-      case 7:
-        {
-          trig4State = trig1In;
-          break;
-        }
-
-      default: break;
-    }
+    unsigned int source = rotateSource[3][rotation4] - 1;
+    trig4State = inputs[source];
+    rotate4Choke = chokes[source];
   }
 }
 
-//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-
-/*
-
-Here is the previous code just to compare.  It's a bit more legible and shows the general pattern behind the trigger input/ output reassignments
-
-switch ( rotation ) {   //selects which version of scramble we perform
-
-    case 0: {
-      if ( ( modifyLength1 > 0 ) && ( mode1 == 4 ) ) trig1State = trig1In ;    //You can see that each of these entries is just a different version of assigning inputs to outputs
-      if ( ( modifyLength2 > 0 ) && ( mode2 == 4 ) ) trig2State = trig3In ;
-      if ( ( modifyLength3 > 0 ) && ( mode3 == 4 ) ) trig3State = trig2In ;
-      if ( ( modifyLength4 > 0 ) && ( mode4 == 4 ) ) trig4State = trig4In ;
-      break;
-    }
-
-    case 1: {
-      if ( ( modifyLength1 > 0 ) && ( mode1 == 4 ) ) trig1State = trig3In ;
-      if ( ( modifyLength2 > 0 ) && ( mode2 == 4 ) ) trig2State = trig4In ;
-      if ( ( modifyLength3 > 0 ) && ( mode3 == 4 ) ) trig3State = trig1In ;
-      if ( ( modifyLength4 > 0 ) && ( mode4 == 4 ) ) trig4State = trig2In ;
-      break;
-    }
-
-    case 2: {
-      if ( ( modifyLength1 > 0 ) && ( mode1 == 4 ) ) trig1State = trig4In ;
-      if ( ( modifyLength2 > 0 ) && ( mode2 == 4 ) ) trig2State = trig3In ;
-      if ( ( modifyLength3 > 0 ) && ( mode3 == 4 ) ) trig3State = trig2In ;
-      if ( ( modifyLength4 > 0 ) && ( mode4 == 4 ) ) trig4State = trig1In ;
-      break;
-    }
-
-    case 3: {
-      if ( ( modifyLength1 > 0 ) && ( mode1 == 4 ) ) trig1State = trig2In ;
-      if ( ( modifyLength2 > 0 ) && ( mode2 == 4 ) ) trig2State = trig1In ;
-      if ( ( modifyLength3 > 0 ) && ( mode3 == 4 ) ) trig3State = trig4In ;
-      if ( ( modifyLength4 > 0 ) && ( mode4 == 4 ) ) trig4State = trig3In ;
-      break;
-    }
-
-    case 4: {
-      if ( ( modifyLength1 > 0 ) && ( mode1 == 4 ) ) trig1State = trig1In ;
-      if ( ( modifyLength2 > 0 ) && ( mode2 == 4 ) ) trig2State = trig2In ;
-      if ( ( modifyLength3 > 0 ) && ( mode3 == 4 ) ) trig3State = trig3In ;
-      if ( ( modifyLength4 > 0 ) && ( mode4 == 4 ) ) trig4State = trig4In ;
-      break;
-    }
-
-    case 5: {
-      if ( ( modifyLength1 > 0 ) && ( mode1 == 4 ) ) trig1State = trig4In ;
-      if ( ( modifyLength2 > 0 ) && ( mode2 == 4 ) ) trig2State = trig1In ;
-      if ( ( modifyLength3 > 0 ) && ( mode3 == 4 ) ) trig3State = trig2In ;
-      if ( ( modifyLength4 > 0 ) && ( mode4 == 4 ) ) trig4State = trig3In ;
-      break;
-    }
-
-    case 6: {
-      if ( ( modifyLength1 > 0 ) && ( mode1 == 4 ) ) trig1State = trig3In ;
-      if ( ( modifyLength2 > 0 ) && ( mode2 == 4 ) ) trig2State = trig4In ;
-      if ( ( modifyLength3 > 0 ) && ( mode3 == 4 ) ) trig3State = trig1In ;
-      if ( ( modifyLength4 > 0 ) && ( mode4 == 4 ) ) trig4State = trig2In ;
-      break;
-    }
-
-    case 7: {
-      if ( ( modifyLength1 > 0 ) && ( mode1 == 4 ) ) trig1State = trig2In ;
-      if ( ( modifyLength2 > 0 ) && ( mode2 == 4 ) ) trig2State = trig3In ;
-      if ( ( modifyLength3 > 0 ) && ( mode3 == 4 ) ) trig3State = trig4In ;
-      if ( ( modifyLength4 > 0 ) && ( mode4 == 4 ) ) trig4State = trig1In ;
-      break;
-    }
-  }
-  */
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\

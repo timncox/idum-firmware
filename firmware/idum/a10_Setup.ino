@@ -4,9 +4,33 @@
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
+//The panel ADCs are not floating, but their least-significant bits and the
+//free-running timer still provide a better startup seed than Arduino's fixed
+//default sequence. The first external clock supplies the stronger timing seed.
+unsigned long gatherEntropy() {
+  unsigned long entropy = micros();
+  const uint8_t entropyPins[4] = { modePin, probPin, lengPin, paramPin };
+
+  for (uint8_t i = 0; i < 16; ++i) {
+    entropy = (entropy << 1) | (analogRead(entropyPins[i & 3]) & 1);
+    entropy ^= micros();
+  }
+
+  return entropy;
+}
+
+void seedRNGOnFirstClock() {
+  if (!rngSeeded && clockEdge) {
+    randomSeed(micros() ^ ((unsigned long)analogRead(paramPin) << 6) ^ analogRead(probPin));
+    rngSeeded = 1;
+  }
+}
+
 void setup() {
 
   assignPins();  //Set input and output status of pins.
+
+  randomSeed(gatherEntropy());
 
   displayFirmwareVersion(4);  //This displays on the mode ring which firmware is loaded on your IDUM.  Increase the number for each update.
 
