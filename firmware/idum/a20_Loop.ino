@@ -27,6 +27,11 @@ void loop() {
 
   modifyTest();  //Check to see if a modification is being done, if not randomly decide if one will be done.
 
+  //Record the modification state that the outputs below will actually use.
+  //Gate/timing history is captured earlier, but modification decisions happen
+  //in modifyTest(), so saving these variables before it shifts playback by one clock.
+  if (!loopEnable) storeCurrentModificationVariables();
+
   handleMenu();  //handle the menu that is called up by holding the "mode" button
 
   handleOutputs();  //Send out the final calculated values of the clock and gates.

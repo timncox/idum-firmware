@@ -136,12 +136,23 @@ unsigned int selectCurrentMode() {
   // Loop through the intervals and find the interval that bounds the knob position
   for (int i = 0; i < intervalCount; ++i) {
 
-    //finds the closest boundary to the left of the current mode knob position.  Adds a bit to each boundary when our for loop index 'i' is
-    //equal to the most recently selected mode for hysteresis/ reducing jitter.
-    long bottomCalc = (long)intervals[i].left + ((modePosition == (i - 1)) * 20) + ((modePosition == i) * -20);
+    //modePosition stores the actual mode ID, while i is only the packed index
+    //of an enabled-mode interval. Compare against the interval mode IDs so
+    //hysteresis still works when intermediate modes have been removed.
+    bool selectedThisInterval = modePosition == intervals[i].mode;
+    bool selectedLeftInterval = (i > 0) && (modePosition == intervals[i - 1].mode);
+    bool selectedRightInterval = (i + 1 < intervalCount) && (modePosition == intervals[i + 1].mode);
+
+    //Expand the selected interval by 20 ADC counts and contract its immediate
+    //neighbors by the same amount, preventing overlap from changing modes.
+    long bottomCalc = (long)intervals[i].left
+                      + (selectedLeftInterval ? 20 : 0)
+                      - (selectedThisInterval ? 20 : 0);
 
     //does the same test but for the closest right boundary.
-    long topCalc = (long)intervals[i].right + ((modePosition == i) * 20) + (modePosition == (i + 1) * -20);
+    long topCalc = (long)intervals[i].right
+                   + (selectedThisInterval ? 20 : 0)
+                   - (selectedRightInterval ? 20 : 0);
 
     //The -20 hysteresis nudge can cross zero at the first interval. Clamp in
     //signed arithmetic instead of wrapping an unsigned bound near 65535.

@@ -11,7 +11,7 @@ SIM_SDKROOT := $(shell xcrun --show-sdk-path 2>/dev/null)
 SIM_LIBCXX := $(SIM_SDKROOT)/usr/include/c++/v1
 SIM_PLATFORM_FLAGS := $(if $(wildcard $(SIM_LIBCXX)/cstdint),-isystem $(SIM_LIBCXX))
 SIM_CXXFLAGS ?= -std=c++17 -Wall -Wextra -Wno-unused-parameter -Wno-comment -Wno-sign-compare
-SIM_DEFINES ?= -DIDUM_SIM_HAS_ADC_DIAGNOSTIC=1 -DIDUM_SIM_HAS_LOOP_MODULATION=1 -DIDUM_SIM_HAS_RNG_SEEDING=1 -DIDUM_SIM_CONST_BREAK_TABLE=1
+SIM_DEFINES ?= -DIDUM_SIM_HAS_ADC_DIAGNOSTIC=1 -DIDUM_SIM_HAS_LOOP_MODULATION=1 -DIDUM_SIM_HAS_RNG_SEEDING=1 -DIDUM_SIM_HAS_ATOMIC_LOOP_RECORD=1 -DIDUM_SIM_CONST_BREAK_TABLE=1
 SIM_BUILD := build/sim/idum-sim
 
 .PHONY: help doctor setup build upload safe-io-build safe-io-upload adc-diagnostic-build adc-diagnostic-upload clean board-list sim sim-modes sim-regressions sim-clock-stop sim-break-patterns sim-break-playback sim-id00m-regressions sim-clean

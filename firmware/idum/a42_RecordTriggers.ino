@@ -5,9 +5,6 @@
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
 void recordTriggers() {
-
-  storeCurrentModificationVariables();  //Save all variables related to any currently engaged modifications
-
   storeCurrentTriggersOnClockEdge();  //save the loop gates and variables for later
 
   storeTrigInterruptsInLoop();  //Interrupt driven storage of gates whenever a rising edge is received
@@ -31,22 +28,22 @@ void storeCurrentModificationVariables() {
     paramHistory[0][historyIndex][3] = originalModifyLength;
 
     paramHistory[1][historyIndex][0] = mode1;
-    paramHistory[1][historyIndex][1] = modifyParam;
+    paramHistory[1][historyIndex][1] = modifyParam1;
     paramHistory[1][historyIndex][2] = modifyLength1;
     paramHistory[1][historyIndex][3] = originalModifyLength1;
 
     paramHistory[2][historyIndex][0] = mode2;
-    paramHistory[2][historyIndex][1] = modifyParam;
+    paramHistory[2][historyIndex][1] = modifyParam2;
     paramHistory[2][historyIndex][2] = modifyLength2;
     paramHistory[2][historyIndex][3] = originalModifyLength2;
 
     paramHistory[3][historyIndex][0] = mode3;
-    paramHistory[3][historyIndex][1] = modifyParam;
+    paramHistory[3][historyIndex][1] = modifyParam3;
     paramHistory[3][historyIndex][2] = modifyLength3;
     paramHistory[3][historyIndex][3] = originalModifyLength3;
 
     paramHistory[4][historyIndex][0] = mode4;
-    paramHistory[4][historyIndex][1] = modifyParam;
+    paramHistory[4][historyIndex][1] = modifyParam4;
     paramHistory[4][historyIndex][2] = modifyLength4;
     paramHistory[4][historyIndex][3] = originalModifyLength4;
   }
@@ -81,49 +78,74 @@ void storeCurrentTriggersOnClockEdge() {
 //A somewhat imperfect solution for more accurate trigger recording.  In the next firmware update the input triggers will drive everything
 //using external interrupts to make all trigger input timings more accurate.
 
-unsigned long atomicReadULong(volatile unsigned long *value) {
+bool consumeLoopRecord(volatile bool *flag, volatile unsigned long *timestamp, unsigned long *snapshot) {
   noInterrupts();
-  unsigned long snapshot = *value;
+  bool pending = *flag;
+  if (pending) {
+    *snapshot = *timestamp;
+    *flag = 0;
+  }
   interrupts();
-  return snapshot;
+  return pending;
+}
+
+void requeueLoopRecord(volatile bool *flag, volatile unsigned long *timestamp, unsigned long snapshot) {
+  noInterrupts();
+  // Do not replace a newer edge that arrived while the consumed record was
+  // being classified.
+  if (!*flag) {
+    *timestamp = snapshot;
+    *flag = 1;
+  }
+  interrupts();
 }
 
 void storeTrigInterruptsInLoop() {
 
-  unsigned int currentTick = 0;
+  int currentTick = 0;
+  unsigned long risingEdgeTime = 0;
 
   //If the trigger flag is set high by the external interrupt based on trigger input 1.
-  if (forceTrig1LoopRecord) {
+  if (consumeLoopRecord(&forceTrig1LoopRecord, &forceTrig1LoopRecordTime, &risingEdgeTime)) {
 
     //calculate the tick that the trigger interrupt happened in based on the recorded time.
-    currentTick = decideTickRecord(atomicReadULong(&forceTrig1LoopRecordTime));
+    currentTick = decideTickRecord(risingEdgeTime);
 
     //If the returned tick value is within expected parameters store a trigger in the looper at the calculated tick value.
     if ((currentTick > 0) && (currentTick < 4)) trigHistory[0][historyIndex][currentTick] = 1;  //error checking
 
-    //If the most recent trigger happened outside of the expected trigger interval past the most recent clock time don't store any triggers.
-    if (currentTick < 4) forceTrig1LoopRecord = 0;
+    //Keep an event that belongs to a future clock window, unless an ISR has
+    //already installed a newer event for this channel.
+    if (currentTick >= 4) {
+      requeueLoopRecord(&forceTrig1LoopRecord, &forceTrig1LoopRecordTime, risingEdgeTime);
+    }
   }
 
-  if (forceTrig2LoopRecord) {
+  if (consumeLoopRecord(&forceTrig2LoopRecord, &forceTrig2LoopRecordTime, &risingEdgeTime)) {
 
-    currentTick = decideTickRecord(atomicReadULong(&forceTrig2LoopRecordTime));
+    currentTick = decideTickRecord(risingEdgeTime);
     if ((currentTick > 0) && (currentTick < 4)) trigHistory[1][historyIndex][currentTick] = 1;
-    if (currentTick < 4) forceTrig2LoopRecord = 0;
+    if (currentTick >= 4) {
+      requeueLoopRecord(&forceTrig2LoopRecord, &forceTrig2LoopRecordTime, risingEdgeTime);
+    }
   }
 
-  if (forceTrig3LoopRecord) {
+  if (consumeLoopRecord(&forceTrig3LoopRecord, &forceTrig3LoopRecordTime, &risingEdgeTime)) {
 
-    currentTick = decideTickRecord(atomicReadULong(&forceTrig3LoopRecordTime));
+    currentTick = decideTickRecord(risingEdgeTime);
     if ((currentTick > 0) && (currentTick < 4)) trigHistory[2][historyIndex][currentTick] = 1;
-    if (currentTick < 4) forceTrig3LoopRecord = 0;
+    if (currentTick >= 4) {
+      requeueLoopRecord(&forceTrig3LoopRecord, &forceTrig3LoopRecordTime, risingEdgeTime);
+    }
   }
 
-  if (forceTrig4LoopRecord) {
+  if (consumeLoopRecord(&forceTrig4LoopRecord, &forceTrig4LoopRecordTime, &risingEdgeTime)) {
 
-    currentTick = decideTickRecord(atomicReadULong(&forceTrig4LoopRecordTime));
+    currentTick = decideTickRecord(risingEdgeTime);
     if ((currentTick > 0) && (currentTick < 4)) trigHistory[3][historyIndex][currentTick] = 1;
-    if (currentTick < 4) forceTrig4LoopRecord = 0;
+    if (currentTick >= 4) {
+      requeueLoopRecord(&forceTrig4LoopRecord, &forceTrig4LoopRecordTime, risingEdgeTime);
+    }
   }
 }
 

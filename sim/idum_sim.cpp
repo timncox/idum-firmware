@@ -12,6 +12,7 @@
 #include <iostream>
 #include <functional>
 #include <string>
+#include <sys/wait.h>
 #include <vector>
 
 SerialStub Serial;
@@ -24,8 +25,12 @@ void modifyTest();
 void activateModification();
 void decideModificationStatus();
 void calculateModeBoundaries();
+unsigned int calculateCustomBoundary(unsigned int leftModeIndex, unsigned int rightModeIndex);
 unsigned int selectCurrentMode();
 void loopModificationHandler();
+void storeCurrentModificationVariables();
+void storeTrigInterruptsInLoop();
+void trig1InterruptHandler();
 void ratchet();
 void rotate();
 void outputGates();
@@ -54,6 +59,7 @@ extern bool loopIndexChanged;
 extern bool menuMode;
 extern bool modificationActive;
 extern bool splitMode;
+extern bool freezeParam;
 extern bool startModification;
 extern bool endModification;
 extern bool carryOver;
@@ -89,6 +95,11 @@ extern unsigned int modifyLength1;
 extern unsigned int modifyLength2;
 extern unsigned int modifyLength3;
 extern unsigned int modifyLength4;
+extern unsigned int modifyParam;
+extern unsigned int modifyParam1;
+extern unsigned int modifyParam2;
+extern unsigned int modifyParam3;
+extern unsigned int modifyParam4;
 extern unsigned int originalModifyLength;
 extern unsigned int paramHistory[5][8][4];
 extern unsigned int paramResolution;
@@ -102,6 +113,15 @@ extern unsigned int unscaledParam2;
 extern unsigned int unscaledParam3;
 extern unsigned int unscaledParam4;
 extern unsigned long lastTrig1Interval;
+extern unsigned long lastClockInterval;
+extern unsigned long lastClockTime;
+#if defined(IDUM_SIM_ID00M) || defined(IDUM_SIM_HAS_ATOMIC_LOOP_RECORD)
+extern volatile bool forceTrig1LoopRecord;
+extern volatile unsigned long forceTrig1LoopRecordTime;
+#else
+extern bool forceTrig1LoopRecord;
+extern unsigned long forceTrig1LoopRecordTime;
+#endif
 #if defined(IDUM_SIM_ID00M) || defined(IDUM_SIM_HAS_RNG_SEEDING)
 extern bool rngSeeded;
 #endif
@@ -121,6 +141,8 @@ std::array<uint8_t, 32> lastLoggedPins {};
 std::array<int, 32> analogPins {};
 std::vector<PinWrite> writes;
 std::string programPath;
+bool simInterruptsEnabled = true;
+std::function<void()> interruptEnableHook;
 
 void resetSimulation();
 void printWrites();
@@ -129,6 +151,27 @@ int runScenario(const std::string& name);
 int reportFirmwareRegression(const std::string& name, bool fixed, const std::string& observation) {
   std::cout << (fixed ? "FIXED " : "BUG   ") << name << ": " << observation << '\n';
   return fixed ? 0 : 1;
+}
+
+std::string shellQuote(const std::string& value) {
+  std::string quoted = "'";
+  for (char character : value) {
+    if (character == '\'') quoted += "'\\''";
+    else quoted += character;
+  }
+  return quoted + "'";
+}
+
+int normalizedSystemResult(int result) {
+  if (result == -1) return 1;
+  if (WIFEXITED(result)) return WEXITSTATUS(result);
+  if (WIFSIGNALED(result)) return 128 + WTERMSIG(result);
+  return 1;
+}
+
+int runChildScenario(const std::string& scenario) {
+  const std::string command = shellQuote(programPath) + " " + shellQuote(scenario);
+  return normalizedSystemResult(std::system(command.c_str()));
 }
 
 bool tracePin(uint8_t pin) {
@@ -314,6 +357,8 @@ int runModeScenario(
 
 void resetSimulation() {
   simMicros = 0;
+  simInterruptsEnabled = true;
+  interruptEnableHook = nullptr;
   pinModes.fill(INPUT);
   digitalPins.fill(HIGH);
   lastLoggedPins.fill(0xff);
@@ -510,6 +555,126 @@ int removedModeBootRegressionScenario() {
     "removed-mode-power-on",
     fixed,
     "active interval count=" + std::to_string(intervalCount) + ", selected mode=" + std::to_string(mode)
+  );
+}
+
+int runnerExitStatusRegressionScenario() {
+  const int result = runChildScenario("regression-intentional-failure");
+  return reportFirmwareRegression(
+    "runner-propagates-failure",
+    result == 1,
+    "child exit 1 became aggregate result=" + std::to_string(result)
+  );
+}
+
+int interruptRecordRaceRegressionScenario() {
+  resetSimulation();
+  setup();
+
+  historyIndex = 0;
+  lastClockTime = 1000;
+  lastClockInterval = 1000;
+  simMicros = 1600;
+  forceTrig1LoopRecord = true;
+  forceTrig1LoopRecordTime = 1200;  // Tick 1.
+
+  // Inject a second edge at the instant the firmware re-enables interrupts
+  // after consuming the first timestamp.
+  interruptEnableHook = [] { trig1InterruptHandler(); };
+  storeTrigInterruptsInLoop();
+
+  const bool secondEventPreserved = forceTrig1LoopRecord && forceTrig1LoopRecordTime == 1600;
+  storeTrigInterruptsInLoop();
+
+  const bool fixed = trigHistory[0][0][1]
+                     && trigHistory[0][0][2]
+                     && secondEventPreserved
+                     && !forceTrig1LoopRecord;
+  return reportFirmwareRegression(
+    "interrupt-record-consume-race",
+    fixed,
+    "first tick=" + std::to_string(trigHistory[0][0][1])
+      + ", second tick=" + std::to_string(trigHistory[0][0][2])
+      + ", second event preserved=" + std::to_string(secondEventPreserved)
+  );
+}
+
+int loopRecordDecisionPhaseRegressionScenario() {
+  resetSimulation();
+  setup();
+  configureAlwaysModify(4, 256, 0);  // Guaranteed one-step ROTATE modification.
+
+  setLogicalGate(15, true);
+  loop();
+
+  const unsigned int recordedLength = paramHistory[0][historyIndex][2];
+  const bool fixed = modificationActive && modifyLength == 1 && recordedLength == modifyLength;
+  return reportFirmwareRegression(
+    "loop-records-post-decision-state",
+    fixed,
+    "active length=" + std::to_string(modifyLength)
+      + ", recorded length=" + std::to_string(recordedLength)
+  );
+}
+
+int splitFrozenParamRecordingRegressionScenario() {
+  resetSimulation();
+  setup();
+
+  splitMode = true;
+  freezeParam = true;
+  clockEdge = true;
+  historyIndex = 3;
+  modifyParam = 999;
+  modifyParam1 = 128;
+  modifyParam2 = 896;
+  modifyParam3 = 320;
+  modifyParam4 = 704;
+  modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 2;
+
+  storeCurrentModificationVariables();
+
+  const bool fixed = paramHistory[1][3][1] == modifyParam1
+                     && paramHistory[2][3][1] == modifyParam2
+                     && paramHistory[3][3][1] == modifyParam3
+                     && paramHistory[4][3][1] == modifyParam4;
+  return reportFirmwareRegression(
+    "split-loop-records-frozen-params",
+    fixed,
+    "recorded channel params=" + std::to_string(paramHistory[1][3][1]) + "/"
+      + std::to_string(paramHistory[2][3][1]) + "/"
+      + std::to_string(paramHistory[3][3][1]) + "/"
+      + std::to_string(paramHistory[4][3][1])
+  );
+}
+
+int removedModeHysteresisRegressionScenario() {
+  resetSimulation();
+  setup();
+
+  for (bool &activeMode : activeModes) activeMode = false;
+  activeModes[2] = true;
+  activeModes[6] = true;
+  modificationActive = false;
+  menuMode = false;
+  calculateModeBoundaries();
+  const unsigned int boundary = calculateCustomBoundary(2, 6);
+
+  mode = modePosition = 2;
+  modeRead = boundary + 10;
+  selectCurrentMode();
+  const bool heldLowerMode = modePosition == 2;
+
+  mode = modePosition = 6;
+  modeRead = boundary - 10;
+  selectCurrentMode();
+  const bool heldUpperMode = modePosition == 6;
+
+  return reportFirmwareRegression(
+    "removed-mode-boundary-hysteresis",
+    heldLowerMode && heldUpperMode,
+    "held lower/upper=" + std::to_string(heldLowerMode) + "/" + std::to_string(heldUpperMode)
+      + " around boundary=" + std::to_string(boundary)
   );
 }
 
@@ -1091,8 +1256,7 @@ int allModesScenario() {
   };
 
   for (const auto& scenario : scenarios) {
-    const std::string command = programPath + " " + scenario;
-    const int result = std::system(command.c_str());
+    const int result = runChildScenario(scenario);
     if (result != 0) return result;
   }
 
@@ -1102,6 +1266,11 @@ int allModesScenario() {
 
 int allRegressionsScenario() {
   const std::vector<std::string> scenarios = {
+    "regression-runner-status",
+    "regression-interrupt-record-race",
+    "regression-loop-record-phase",
+    "regression-split-frozen-param-recording",
+    "regression-removed-mode-hysteresis",
     "regression-length-1",
     "regression-rotate-split-param",
     "regression-rotate-silent-destination",
@@ -1116,8 +1285,7 @@ int allRegressionsScenario() {
   };
 
   for (const auto& scenario : scenarios) {
-    const std::string command = programPath + " " + scenario;
-    const int result = std::system(command.c_str());
+    const int result = runChildScenario(scenario);
     if (result != 0) return result;
   }
 
@@ -1127,6 +1295,12 @@ int allRegressionsScenario() {
 
 int runScenario(const std::string& name) {
   if (name == "smoke") return smokeScenario();
+  if (name == "regression-intentional-failure") return 1;
+  if (name == "regression-runner-status") return runnerExitStatusRegressionScenario();
+  if (name == "regression-interrupt-record-race") return interruptRecordRaceRegressionScenario();
+  if (name == "regression-loop-record-phase") return loopRecordDecisionPhaseRegressionScenario();
+  if (name == "regression-split-frozen-param-recording") return splitFrozenParamRecordingRegressionScenario();
+  if (name == "regression-removed-mode-hysteresis") return removedModeHysteresisRegressionScenario();
   if (name == "regression-length-1") return lengthOneRegressionScenario();
   if (name == "regression-rotate-split-param") return splitRotateParamRegressionScenario();
   if (name == "regression-rotate-silent-destination") return rotateSilentDestinationRegressionScenario();
@@ -1219,8 +1393,19 @@ void randomSeed(unsigned long seed) {
   std::srand(static_cast<unsigned int>(seed));
 }
 
-void noInterrupts() {}
-void interrupts() {}
+void noInterrupts() {
+  simInterruptsEnabled = false;
+}
+
+void interrupts() {
+  const bool wasDisabled = !simInterruptsEnabled;
+  simInterruptsEnabled = true;
+  if (wasDisabled && interruptEnableHook) {
+    auto hook = std::move(interruptEnableHook);
+    interruptEnableHook = nullptr;
+    hook();
+  }
+}
 
 void assignPins();
 void displayFirmwareVersion(unsigned int firmwareNumber);

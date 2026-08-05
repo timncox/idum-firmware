@@ -24,6 +24,13 @@ external source checkout required:
 make sim-regressions
 ```
 
+The suite currently covers 16 behaviors, including aggregate failure status,
+interrupt-record consumption, looper recording phase, per-channel frozen
+parameters, removed-mode hysteresis, ROTATE routing/chokes, ratchet safety,
+and startup RNG seeding. The interrupt race scenario injects an edge exactly
+when the simulated critical section re-enables interrupts; this exercises the
+firmware's consume/clear ordering without pretending to emulate the AVR.
+
 Run the clock-stop regression for generated repeats:
 
 ```sh
@@ -69,6 +76,7 @@ build/sim/idum-sim break-patterns
 build/sim/idum-sim break-playback
 build/sim/idum-sim skip
 build/sim/idum-sim all-modes
+build/sim/idum-sim all-regressions
 ```
 
 The simulator currently stubs:
