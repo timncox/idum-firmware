@@ -10,6 +10,8 @@ void readInputs() {
 
   readAnalogInputs();  //grab the value of all analog CV inputs.
 
+  updateLoopModulationParamPickup();  //hold mutation Param after leaving LOOP until the control actually moves
+
   scaleCVInputs();  //scale the analog CV inputs.
 
   updateLoopModulationLengthLatch();  //keep mutation length latched while the live control edits the loop
@@ -52,6 +54,62 @@ void readAnalogInputs() {
 
   //Copy to another variable for legibility.  We used to do more here with the freezeParam function but now we have a separate function for that.
   modifyParam = paramRead;
+}
+
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+void applyMutationParamHold() {
+  modifyParam = mutationParamHeld;
+  unscaledParam = mutationUnscaledParamHeld;
+  ratchetAmount = mutationRatchetAmountHeld;
+
+  modifyParam1 = modifyParam2 = modifyParam3 = modifyParam4 = mutationParamHeld;
+  unscaledParam1 = unscaledParam2 = unscaledParam3 = unscaledParam4 = mutationUnscaledParamHeld;
+  ratchetAmount1 = ratchetAmount2 = ratchetAmount3 = ratchetAmount4 = mutationRatchetAmountHeld;
+}
+
+void captureMutationParamForLoop() {
+  mutationParamHeld = modifyParam;
+  mutationUnscaledParamHeld = unscaledParam;
+  mutationRatchetAmountHeld = ratchetAmount;
+  loopParamPickupActive = 0;
+}
+
+void armMutationParamPickupAfterLoop() {
+  if (!loopModulationMode) {
+    loopParamPickupActive = 0;
+    return;
+  }
+
+  loopParamPickupReference = paramRead;
+  loopParamPickupActive = 1;
+  applyMutationParamHold();
+}
+
+void updateLoopModulationParamPickup() {
+  if (!loopParamPickupActive) return;
+
+  //Dropping CYCLE explicitly returns every control to normal tracking.
+  if (!loopModulationMode) {
+    loopParamPickupActive = 0;
+    return;
+  }
+
+  unsigned int movement = (paramRead > loopParamPickupReference)
+                        ? paramRead - loopParamPickupReference
+                        : loopParamPickupReference - paramRead;
+
+  if (movement > loopParamPickupMovementThreshold) {
+    loopParamPickupActive = 0;
+    return;
+  }
+
+  applyMutationParamHold();
+}
+
+unsigned int getMutationParamReading() {
+  if (loopParamPickupActive) return mutationParamHeld;
+  return paramRead;
 }
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\

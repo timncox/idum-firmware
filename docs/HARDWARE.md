@@ -39,6 +39,21 @@ This means a normal Nano Every bootloader upload should work through the USB por
 make upload PORT=/dev/cu.usbmodem...
 ```
 
+## Mode-ring LED Order and Boot Reset
+
+Hardware v1.3 and later uses the remapped mode-ring mux order observed on this
+module. Earlier boards use the original direct mux order. Firmware stores that
+hardware choice independently in EEPROM byte 5:
+
+- Hold **LOOP** during power-on to toggle the LED order. A reverse ring sweep
+  confirms the change; release LOOP to continue booting.
+- Hold **MODE/REMOVE** during power-on to restore user settings. A forward ring
+  sweep confirms the reset; release MODE to continue booting. This reset does
+  not change the stored LED order.
+
+The default for a new or newly formatted EEPROM is the v1.3+ order. The EEPROM
+format marker is `R`; upgrading from an older format resets bytes 1–4 once.
+
 ## Firmware Size Baseline
 
 With `arduino:megaavr:nona4809:mode=off`, imported v0.99 builds at:

@@ -32,7 +32,7 @@ void setup() {
 
   randomSeed(gatherEntropy());
 
-  displayFirmwareVersion(5);  //This displays on the mode ring which firmware is loaded on your IDUM.  Increase the number for each update.
+  readStartupButtonStates();
 
 #if IDUM_ADC_DIAGNOSTIC
   Serial.begin(115200);
@@ -45,6 +45,10 @@ void setup() {
   initializeIntervals();  //Sets up some variables used in the "Boundary Utils" page of functions.
 
   initializeHardwareInterrupts();
+
+  startupAnimation();
+
+  displayFirmwareVersion(7);  //This displays on the mode ring which firmware is loaded on your IDUM.  Increase the number for each update.
 
   delay(1000);  //Delay the start of the program so that we can display the firmware number for a little bit longer.
 
@@ -143,7 +147,7 @@ void writeModeMuxAddress(unsigned int muxAddress) {
 
 void writeModeLed(unsigned int ledIndex) {
   if (ledIndex > 7) ledIndex = 7;
-  writeModeMuxAddress(modeLedAddressMap[ledIndex]);
+  writeModeMuxAddress(LEDTweak ? modeLedAddressMap[ledIndex] : ledIndex);
 }
 
 void displayFirmwareVersion(unsigned int firmwareNumber) {
@@ -155,6 +159,24 @@ void displayFirmwareVersion(unsigned int firmwareNumber) {
 
 //Reads the options, active modes, and any other variables that have been saved from before the most recent power down.
 
+void readStartupButtonStates() {
+  factoryResetHeld = !digitalReadFast(modeBtn);
+  if (factoryResetHeld) delay(20);
+  factoryResetHeld = factoryResetHeld && !digitalReadFast(modeBtn);
+
+  changeLEDOrder = !digitalReadFast(loopButton);
+  if (changeLEDOrder) delay(20);
+  changeLEDOrder = changeLEDOrder && !digitalReadFast(loopButton);
+}
+
+void writeEEPROMDefaults() {
+  EEPROM.write(0, 'R');
+  EEPROM.write(1, 0);
+  EEPROM.write(2, 255);
+  EEPROM.write(3, 0);
+  EEPROM.write(4, 0);
+}
+
 void initializeEEPROM() {
 
   byte modeByte = 0;    //This is used to save all of the active modes into one byte instead of as separate variables.
@@ -162,25 +184,71 @@ void initializeEEPROM() {
 
   char eepromInitialized = EEPROM.read(0);  //We save a letter into the first memory location on the EEPROM to show that it has been initialiazed.
 
-  if (eepromInitialized == 'Q') {  //Make sure that the right letter is saved (this might change between firmwares).
-    optionByte = EEPROM.read(1);
-    modeByte = EEPROM.read(2);
-    paramResolution = EEPROM.read(3);
-    lengthResolution = EEPROM.read(4);
+  if (eepromInitialized == 'R') {  //R adds the independently stored LED-order byte.
+    LEDTweak = EEPROM.read(5) != 0;
 
-    setModeArray(modeByte);  //Take each bit of the mode byte and spit it into separate locations in the mode Array.
-    setOptions(optionByte);  //Take each bit of the option byte and split it into separate variables.
+    if (factoryResetHeld) {
+      writeEEPROMDefaults();
+      startupAnimationNumber = 2;
+    }
 
-    if (printEnable) Serial.println("test passed");  //Lets us know that the EEPROM had been saved to before in the appropriate format.
+    else {
+      optionByte = EEPROM.read(1);
+      modeByte = EEPROM.read(2);
+      paramResolution = EEPROM.read(3);
+      lengthResolution = EEPROM.read(4);
+
+      setModeArray(modeByte);  //Take each bit of the mode byte and spit it into separate locations in the mode Array.
+      setOptions(optionByte);  //Take each bit of the option byte and split it into separate variables.
+
+      if (printEnable) Serial.println("test passed");  //Lets us know that the EEPROM had been saved to before in the appropriate format.
+    }
   }
 
   else {                                                                    //If our test of the EEPROM having the right letter saved fails we write some default values in.
-    EEPROM.write(0, 'Q');                                                   //verifies that the eeprom has been initialized, if not we write everything for the first time.
-    EEPROM.write(1, 0);                                                     //saves all '0's so all options are off
-    EEPROM.write(2, 255);                                                   //saves all '1's so all modes are active
-    EEPROM.write(3, 0);                                                     //sets the parameter resolution to 'odd'
-    EEPROM.write(4, 0);                                                     //sets the length resolution to 'odd'
+    writeEEPROMDefaults();
+    LEDTweak = LEDTweakSetEEPROM;
+    EEPROM.write(5, LEDTweak);
+    startupAnimationNumber = 1;
     if (printEnable) Serial.println("Test failed.  EEPROM Reinitialized");  //Lets us know that the EEPROM had to be reset.
+  }
+
+  if (changeLEDOrder) {
+    LEDTweak = !LEDTweak;
+    EEPROM.write(5, LEDTweak);
+    startupAnimationNumber = 3;
+  }
+}
+
+void startupAnimation() {
+  if (startupAnimationNumber == 1) {
+    for (uint8_t i = 0; i < 5; ++i) {
+      digitalWriteFast(loopLED, HIGH);
+      delay(100);
+      digitalWriteFast(loopLED, LOW);
+      delay(100);
+    }
+  }
+
+  else if (startupAnimationNumber == 2) {
+    unsigned int led = 0;
+    digitalWriteFast(loopLED, HIGH);
+    while (!digitalReadFast(modeBtn)) {
+      writeModeLed(led++ % 8);
+      delay(50);
+    }
+    digitalWriteFast(loopLED, LOW);
+  }
+
+  else if (startupAnimationNumber == 3) {
+    int led = 7;
+    digitalWriteFast(loopLED, HIGH);
+    while (!digitalReadFast(loopButton)) {
+      writeModeLed(led);
+      led = (led + 7) % 8;
+      delay(50);
+    }
+    digitalWriteFast(loopLED, LOW);
   }
 }
 

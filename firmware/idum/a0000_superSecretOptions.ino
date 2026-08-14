@@ -55,6 +55,22 @@ bool fastExternalSequencerClock = 1; //default = 1
 
 bool rearmGeneratedTriggerChokesOnCarryOver = 1; //default = 1
 
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+//Mode-ring LED order. Hardware v1.3 and later uses the remapped order. Older
+//boards can select the original mux order by holding LOOP while powering on.
+//The selected order is stored separately in EEPROM so a factory settings reset
+//does not erase this hardware-specific choice.
+
+bool LEDTweakSetEEPROM = 1; //default = 1 for hardware v1.3 and later
+bool LEDTweak = 1;
+
+//After leaving LOOP while the CYCLE performance layer is active, ignore small
+//Param ADC changes until the combined knob/CV signal actually moves. This keeps
+//normal ADC noise from releasing the one-shot mutation Param hold.
+
+unsigned int loopParamPickupMovementThreshold = 12;
+
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
 //Probability behavior.  Lowering probabilityLowerThreshold lets the bottom of the Chance slider produce tiny amounts of randomness.
@@ -86,7 +102,7 @@ unsigned int clockMultiplyWindow = 1000;             //default = 1ms window for 
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
-//Mode LED multiplexer mapping.
+//Mode LED multiplexer mapping for hardware v1.3 and later.
 //Your hardware was observed to light physical LEDs 7, 6, 4, 2, 1, 3, 5, 8 while sweeping logical modes 1-8.
 //This table maps logical display positions 1-8 back to the mux addresses that light physical LEDs 1-8.
 

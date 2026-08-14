@@ -30,6 +30,8 @@ void handleLooper() {
 
 void determineLooperStatus() {
 
+  bool loopEnableAtStart = loopEnable;
+
   //if the looper button is pressed and we aren't in the menu change looper status
   if ((loopButtonActiveEdge == 1) && !menuMode) {
     loopEnable = !loopEnable;
@@ -41,7 +43,7 @@ void determineLooperStatus() {
       loopEnable = !loopEnable;
     }
 
-    if (!loopGateIn && loopGateInOld) {  //both rising and falling edges invert the looper status.
+    if (loopGateFallingEdge) {  //both rising and falling edges invert the looper status.
       loopEnable = !loopEnable;
     }
   }
@@ -52,7 +54,9 @@ void determineLooperStatus() {
     }
   }
 
-  if ((loopButtonActiveEdge || loopGateActiveEdge) && loopEnable) {  //run this code if the loop has just turned on
+  if (!loopEnableAtStart && loopEnable) {  //run this code if the loop has just turned on
+
+    captureMutationParamForLoop();
 
     //if the 'cycle' switch is high and a modification is happening we run the maintain cycle function.
     if (cycleIn && (modifyLength != 0)) {
@@ -81,7 +85,9 @@ void determineLooperStatus() {
   }
 
   //run this code if the looper just turned off
-  if ((loopButtonActiveEdge || loopGateActiveEdge) && !loopEnable) {
+  if (loopEnableAtStart && !loopEnable) {
+    armMutationParamPickupAfterLoop();
+
     if (cycleIn) {
       loopCycle();  //if the cycle switch is on we run a specialized cycle function for the looper
     }

@@ -350,7 +350,7 @@ void activateModification() {
 
     //Check for the freeze param flag
     if (freezeParam) {
-      modifyParam = paramRead;  //if Freeze Param is set high we still need to sample this once
+      modifyParam = getMutationParamReading();  //respect the one-shot post-loop Param hold
 
       //and then we copy the modify parameters into each channel's individual variables.
       //Any modifications that activate at the same time will have the same modification variables.
@@ -440,7 +440,7 @@ void activateModification() {
     if (startModification1) {  //if we are starting a new modification
       mode1 = chooseMode();    //we check the mode again just to be sure
       if (freezeParam) {
-        modifyParam1 = paramRead;  //if Freeze Param is set high we still need to sample this once
+        modifyParam1 = getMutationParamReading();  //respect the one-shot post-loop Param hold
         unscaledParam1 = unscaledParam;
         ratchetAmount1 = ratchetAmount;
       }
@@ -471,7 +471,7 @@ void activateModification() {
     if (startModification2) {
       mode2 = chooseMode();
       if (freezeParam) {
-        modifyParam2 = paramRead;  //if Freeze Param is set high we still need to sample this once
+        modifyParam2 = getMutationParamReading();  //respect the one-shot post-loop Param hold
         unscaledParam2 = unscaledParam;
         ratchetAmount2 = ratchetAmount;
       }
@@ -501,7 +501,7 @@ void activateModification() {
     if (startModification3) {
       mode3 = chooseMode();
       if (freezeParam) {
-        modifyParam3 = paramRead;  //if Freeze Param is set high we still need to sample this once
+        modifyParam3 = getMutationParamReading();  //respect the one-shot post-loop Param hold
         unscaledParam3 = unscaledParam;
         ratchetAmount3 = ratchetAmount;
       }
@@ -531,7 +531,7 @@ void activateModification() {
     if (startModification4) {
       mode4 = chooseMode();
       if (freezeParam) {
-        modifyParam4 = paramRead;  //if Freeze Param is set high we still need to sample this once
+        modifyParam4 = getMutationParamReading();  //respect the one-shot post-loop Param hold
         unscaledParam4 = unscaledParam;
         ratchetAmount4 = ratchetAmount;
       }

@@ -45,6 +45,12 @@ unsigned long modeBtnDebounceTime = 0;
 bool modeBtnReset = 0;
 bool menuModeReset = 0;
 
+//Boot gestures. MODE restores user settings; LOOP toggles the hardware LED
+//order. startupAnimationNumber tells setup which confirmation to display.
+bool factoryResetHeld = 0;
+bool changeLEDOrder = 0;
+uint16_t startupAnimationNumber = 0;
+
 unsigned int clockTick2 = 0;
 unsigned int clockTick2Old = 0;
 unsigned long tickInterval = 61;     //I think this is the value makes 120 BPM around 64 ticks
@@ -454,6 +460,7 @@ unsigned long loopGateTime = 0;
 bool loopGateActive = 0;
 bool loopGateActiveOld = 0;
 bool loopGateActiveEdge = 0;
+bool loopGateFallingEdge = 0;
 
 unsigned int loopCycleCount = 0;
 
@@ -462,6 +469,11 @@ unsigned int loopCycleCount = 0;
 bool cycleIn = 0;
 bool loopModulationMode = 0;
 bool loopModulationModeOld = 0;
+bool loopParamPickupActive = 0;
+unsigned int loopParamPickupReference = 0;
+unsigned int mutationParamHeld = 0;
+unsigned int mutationUnscaledParamHeld = 0;
+unsigned int mutationRatchetAmountHeld = 1;
 bool cycleActivate = 0;
 unsigned long cycleTimeStart = 0;
 unsigned long cycleTimeEnd = 0;

@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <iostream>
 #include <functional>
+#include <sstream>
 #include <string>
 #include <sys/wait.h>
 #include <vector>
@@ -48,7 +49,15 @@ extern bool analogClock;
 extern bool fastExternalSequencerClock;
 extern bool loopModulationMode;
 extern unsigned int mutationLengthScaled;
+extern bool loopParamPickupActive;
+extern unsigned int loopParamPickupReference;
+extern unsigned int mutationParamHeld;
+extern unsigned int loopParamPickupMovementThreshold;
 void updateLoopModulationLengthLatch();
+void updateLoopModulationParamPickup();
+void captureMutationParamForLoop();
+void armMutationParamPickupAfterLoop();
+unsigned int getMutationParamReading();
 unsigned int getMutationLength();
 #endif
 extern bool trigHistory[4][8][4];
@@ -59,6 +68,7 @@ extern unsigned int modePosition;
 extern bool activeModes[8];
 extern bool clockEdge;
 extern bool loopEnable;
+extern bool loopInputBehavior;
 extern bool loopIndexChanged;
 extern bool menuMode;
 extern bool modificationActive;
@@ -124,14 +134,14 @@ extern unsigned int unscaledParam4;
 extern unsigned long lastTrig1Interval;
 extern unsigned long lastClockInterval;
 extern unsigned long lastClockTime;
-#if defined(IDUM_SIM_ID00M) || defined(IDUM_SIM_HAS_ATOMIC_LOOP_RECORD)
+#if defined(IDUM_SIM_ID00M) || defined(IDUM_SIM_ELI_OO) || defined(IDUM_SIM_HAS_ATOMIC_LOOP_RECORD)
 extern volatile bool forceTrig1LoopRecord;
 extern volatile unsigned long forceTrig1LoopRecordTime;
 #else
 extern bool forceTrig1LoopRecord;
 extern unsigned long forceTrig1LoopRecordTime;
 #endif
-#if defined(IDUM_SIM_ID00M) || defined(IDUM_SIM_HAS_RNG_SEEDING)
+#if defined(IDUM_SIM_ID00M) || defined(IDUM_SIM_ELI_OO) || defined(IDUM_SIM_HAS_RNG_SEEDING)
 extern bool rngSeeded;
 #endif
 
@@ -156,6 +166,12 @@ std::function<void()> interruptEnableHook;
 void resetSimulation();
 void printWrites();
 int runScenario(const std::string& name);
+#if defined(IDUM_SIM_ELI_OO) || defined(IDUM_SIM_HAS_BOOT_RESET)
+int bootResetScenario();
+#endif
+#ifdef IDUM_SIM_ELI_OO
+int eliRatchetChannelFourZeroScenario();
+#endif
 
 int reportFirmwareRegression(const std::string& name, bool fixed, const std::string& observation) {
   std::cout << (fixed ? "FIXED " : "BUG   ") << name << ": " << observation << '\n';
@@ -789,7 +805,7 @@ int ratchetZeroIntervalRegressionScenario() {
 std::array<long, 6> randomSequenceAfterFirstClock(unsigned long idleMicros) {
   resetSimulation();
   std::srand(1);  // Model the deterministic C/Arduino RNG state at power-on.
-#if defined(IDUM_SIM_ID00M) || defined(IDUM_SIM_HAS_RNG_SEEDING)
+#if defined(IDUM_SIM_ID00M) || defined(IDUM_SIM_ELI_OO) || defined(IDUM_SIM_HAS_RNG_SEEDING)
   rngSeeded = false;
 #endif
   setup();
@@ -1027,6 +1043,111 @@ int loopModulationLengthScenario() {
     return capturedEntryLength && loopTracksLiveLength && mutationUsesLatchedLength
            && splitMutationsUseLatchedLength && releaseRestoresLiveLength;
   }, "CYCLE latches mutation length while live LENGTH edits the loop", "expected latched mutation length, live loop length, and normal control after release");
+}
+
+int loopModulationParamPickupScenario() {
+  return runModeScenario("loop-modulation-param-pickup", [] {
+    setLogicalAnalog(20, 0);  //avoid unrelated modification starts
+    setLogicalAnalog(19, 220);
+    setLogicalGate(17, true);
+    runFor(20000);
+    const unsigned int preLoopParam = modifyParam;
+
+    pulseGate(16, 5000, 100);
+    runFor(20000);
+    const bool enteredLoop = loopEnable;
+
+    setLogicalAnalog(19, 800);
+    runFor(20000);
+    const bool loopParamStayedLive = modifyParam != preLoopParam;
+
+    pulseGate(16, 5000, 100);
+    runFor(5000);
+    const bool exitArmedPickup = !loopEnable && loopParamPickupActive
+                               && modifyParam == preLoopParam;
+
+    const int withinThreshold = std::min(
+      1024,
+      static_cast<int>(loopParamPickupReference + loopParamPickupMovementThreshold)
+    );
+    setLogicalAnalog(19, withinThreshold);
+    runFor(5000);
+    const bool jitterIgnored = loopParamPickupActive && modifyParam == preLoopParam;
+
+    freezeParam = true;
+    modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 0;
+    startModification = true;
+    activateModification();
+    startModification = false;
+    const bool frozenParamPathRespectsPickup = modifyParam == preLoopParam
+                                            && modifyParam1 == preLoopParam
+                                            && modifyParam2 == preLoopParam
+                                            && modifyParam3 == preLoopParam
+                                            && modifyParam4 == preLoopParam;
+    freezeParam = false;
+    modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 0;
+
+    const int deliberateMove = std::min(
+      1024,
+      static_cast<int>(loopParamPickupReference + loopParamPickupMovementThreshold + 40)
+    );
+    setLogicalAnalog(19, deliberateMove);
+    runFor(5000);
+    const bool movementReleased = !loopParamPickupActive
+                               && modifyParam == static_cast<unsigned int>(deliberateMove);
+
+    setLogicalGate(17, false);
+    runFor(5000);
+    pulseGate(16, 5000, 100);
+    runFor(5000);
+    setLogicalAnalog(19, 360);
+    runFor(5000);
+    pulseGate(16, 5000, 100);
+    runFor(5000);
+    const bool normalExitDoesNotArm = !loopEnable && !loopParamPickupActive
+                                   && modifyParam == 360;
+
+    setLogicalGate(17, true);
+    setLogicalAnalog(19, 240);
+    loopInputBehavior = true;
+    runFor(5000);
+    setLogicalGate(12, true);
+    runFor(5000);
+    const bool gateEnteredLoop = loopEnable;
+    setLogicalAnalog(19, 700);
+    runFor(5000);
+    setLogicalGate(12, false);
+    runFor(5000);
+    const unsigned int gateExitHeldValue = mutationParamHeld;
+    const unsigned int gateExitCurrentValue = modifyParam;
+    const bool gateExitPickupState = loopParamPickupActive;
+    const bool gateExitCycleState = loopModulationMode;
+    const bool gateExitArmedPickup = !loopEnable && loopParamPickupActive
+                                  && mutationParamHeld == 240
+                                  && modifyParam == 240;
+    setLogicalAnalog(19, 760);
+    runFor(5000);
+    const bool gatePickupReleased = !loopParamPickupActive && modifyParam == 760;
+    loopInputBehavior = false;
+
+    const bool passed = enteredLoop && loopParamStayedLive && exitArmedPickup && jitterIgnored
+                     && frozenParamPathRespectsPickup
+                     && movementReleased && normalExitDoesNotArm && gateEnteredLoop
+                     && gateExitArmedPickup && gatePickupReleased;
+    if (!passed) {
+      std::cout << "pickup checks: button=" << enteredLoop << '/' << loopParamStayedLive
+                << '/' << exitArmedPickup << '/' << jitterIgnored
+                << '/' << frozenParamPathRespectsPickup << '/' << movementReleased
+                << ", normal=" << normalExitDoesNotArm
+                << ", gate=" << gateEnteredLoop << '/' << gateExitArmedPickup
+                << '/' << gatePickupReleased
+                << " exit-held/current=" << gateExitHeldValue << '/'
+                << gateExitCurrentValue << " active/cycle="
+                << gateExitPickupState << '/' << gateExitCycleState << '\n';
+    }
+    return passed;
+  }, "post-loop Param waits for real movement only in the CYCLE layer",
+     "expected one-shot Param hold, jitter rejection, movement release, and normal non-CYCLE exit");
 }
 #endif
 
@@ -1309,6 +1430,7 @@ int allModesScenario() {
 #ifdef IDUM_SIM_HAS_LOOP_MODULATION
     "loop-modulation-mode",
     "loop-modulation-length",
+    "loop-modulation-param-pickup",
 #endif
     "ball",
     "rotate",
@@ -1345,6 +1467,9 @@ int allRegressionsScenario() {
     "regression-loop-ratchet-map",
     "regression-ratchet-zero-interval",
     "regression-rng-power-on",
+#if defined(IDUM_SIM_ELI_OO) || defined(IDUM_SIM_HAS_BOOT_RESET)
+    "boot-led-eeprom",
+#endif
   };
 
   for (const auto& scenario : scenarios) {
@@ -1358,6 +1483,12 @@ int allRegressionsScenario() {
 
 int runScenario(const std::string& name) {
   if (name == "smoke") return smokeScenario();
+#if defined(IDUM_SIM_ELI_OO) || defined(IDUM_SIM_HAS_BOOT_RESET)
+  if (name == "boot-led-eeprom") return bootResetScenario();
+#endif
+#ifdef IDUM_SIM_ELI_OO
+  if (name == "eli-ratchet-channel-4-zero") return eliRatchetChannelFourZeroScenario();
+#endif
   if (name == "regression-intentional-failure") return 1;
   if (name == "regression-runner-status") return runnerExitStatusRegressionScenario();
   if (name == "regression-interrupt-record-race") return interruptRecordRaceRegressionScenario();
@@ -1385,6 +1516,7 @@ int runScenario(const std::string& name) {
 #ifdef IDUM_SIM_HAS_LOOP_MODULATION
   if (name == "loop-modulation-mode") return loopModulationModeScenario();
   if (name == "loop-modulation-length") return loopModulationLengthScenario();
+  if (name == "loop-modulation-param-pickup") return loopModulationParamPickupScenario();
 #endif
   if (name == "ratchet") return triggerRatchetScenario();
   if (name == "ball") return ballScenario();
@@ -1399,7 +1531,7 @@ int runScenario(const std::string& name) {
   if (name == "all-regressions") return allRegressionsScenario();
 
   std::cerr << "Unknown scenario: " << name << '\n';
-  std::cerr << "Available scenarios: smoke, regression-length-1, regression-rotate-split-param, regression-rotate-silent-destination, regression-ball-channel-3-reset, regression-back-to-back-mode, regression-removed-mode-boot, regression-split-loop-empty-step, regression-loop-phase, regression-loop-ratchet-map, regression-ratchet-zero-interval, regression-rng-power-on, hold, clock-ratchet, clock-ratchet-divide, clock-ratchet-sparse-min-length, trigger-ratchet, trigger-ratchet-divide, trigger-ratchet-divide-steady, loop-modulation-mode, loop-modulation-length, ball, rotate, delay, break, clock-stop-burst, break-patterns, break-playback, skip, all-modes, all-regressions\n";
+  std::cerr << "Available scenarios: smoke, regression-length-1, regression-rotate-split-param, regression-rotate-silent-destination, regression-ball-channel-3-reset, regression-back-to-back-mode, regression-removed-mode-boot, regression-split-loop-empty-step, regression-loop-phase, regression-loop-ratchet-map, regression-ratchet-zero-interval, regression-rng-power-on, hold, clock-ratchet, clock-ratchet-divide, clock-ratchet-sparse-min-length, trigger-ratchet, trigger-ratchet-divide, trigger-ratchet-divide-steady, loop-modulation-mode, loop-modulation-length, loop-modulation-param-pickup, ball, rotate, delay, break, clock-stop-burst, break-patterns, break-playback, skip, all-modes, all-regressions\n";
   return 2;
 }
 
@@ -1556,12 +1688,24 @@ void saveOptions();
 void setOptions(byte optionByte);
 void saveLoopData();
 
-#ifdef IDUM_SIM_ID00M
+#if defined(IDUM_SIM_ID00M) || defined(IDUM_SIM_ELI_OO) || defined(IDUM_SIM_HAS_BOOT_RESET)
 unsigned long gatherEntropy();
 void seedRNGOnFirstClock();
+void writeEEPROMDefaults();
+#endif
+
+#if defined(IDUM_SIM_ID00M) || defined(IDUM_SIM_ELI_OO)
+unsigned long f9PulseWidth(unsigned long subInterval);
+#endif
+
+#if defined(IDUM_SIM_ELI_OO) || defined(IDUM_SIM_HAS_BOOT_RESET)
+void readStartupButtonStates();
+void startupAnimation();
+#endif
+
+#ifdef IDUM_SIM_ID00M
 void displayCustomFirmwareID(unsigned long durationMs);
 void flashVersion();
-void writeEEPROMDefaults();
 void setPriorityArray(byte b);
 void setBreakSettings(byte b);
 void setF9Settings(byte lo, byte hi);
@@ -1580,7 +1724,6 @@ void setChannelState(unsigned int ch, bool on);
 void applyLinearDrumming();
 unsigned long f9ScalePeriod(unsigned long period, unsigned int ch);
 unsigned long chanClockInterval(unsigned int ch);
-unsigned long f9PulseWidth(unsigned long subInterval);
 unsigned int randomOtherChannel(unsigned int cur);
 void applyInfection(unsigned int ch, unsigned long t);
 void spreadInfection(unsigned int source, unsigned long t, bool cascade, unsigned int prob);
@@ -1631,6 +1774,127 @@ void scatter();
 #include "b82_scatterMode.ino"
 #endif
 #include "x_utils.ino"
+
+#if defined(IDUM_SIM_ELI_OO) || defined(IDUM_SIM_HAS_BOOT_RESET)
+namespace {
+int bootResetScenario() {
+  resetSimulation();
+  factoryResetHeld = false;
+  changeLEDOrder = false;
+  startupAnimationNumber = 0;
+  LEDTweak = LEDTweakSetEEPROM;
+  initializeEEPROM();
+
+  const bool freshInitialized = EEPROM.read(0) == 'R'
+                             && EEPROM.read(1) == 0
+                             && EEPROM.read(2) == 255
+                             && EEPROM.read(3) == 0
+                             && EEPROM.read(4) == 0
+                             && EEPROM.read(5) == static_cast<byte>(LEDTweakSetEEPROM)
+                             && LEDTweak == LEDTweakSetEEPROM
+                             && startupAnimationNumber == 1;
+
+  EEPROM.write(0, 'R');
+  EEPROM.write(1, 255);
+  EEPROM.write(2, 0);
+  EEPROM.write(3, 2);
+  EEPROM.write(4, 1);
+  EEPROM.write(5, 0);
+  factoryResetHeld = true;
+  changeLEDOrder = false;
+  startupAnimationNumber = 0;
+  LEDTweak = true;
+  initializeEEPROM();
+
+  const bool resetPreservedHardware = EEPROM.read(0) == 'R'
+                                   && EEPROM.read(1) == 0
+                                   && EEPROM.read(2) == 255
+                                   && EEPROM.read(3) == 0
+                                   && EEPROM.read(4) == 0
+                                   && EEPROM.read(5) == 0
+                                   && !LEDTweak
+                                   && startupAnimationNumber == 2;
+
+  EEPROM.write(0, 'R');
+  EEPROM.write(1, 0);
+  EEPROM.write(2, 255);
+  EEPROM.write(3, 0);
+  EEPROM.write(4, 0);
+  EEPROM.write(5, 0);
+  factoryResetHeld = false;
+  changeLEDOrder = true;
+  startupAnimationNumber = 0;
+  LEDTweak = true;
+  initializeEEPROM();
+  const bool loopToggledHardware = EEPROM.read(5) == 1
+                                && LEDTweak
+                                && startupAnimationNumber == 3;
+
+#ifdef IDUM_SIM_HAS_BOOT_RESET
+  LEDTweak = false;
+  writeModeLed(0);
+  const bool legacyAddress = digitalRead(mode1LED) == HIGH
+                          && digitalRead(mode2LED) == LOW
+                          && digitalRead(mode3LED) == LOW;
+  LEDTweak = true;
+  writeModeLed(0);
+  const bool v13Address = digitalRead(mode1LED) == HIGH
+                       && digitalRead(mode2LED) == HIGH
+                       && digitalRead(mode3LED) == HIGH;
+#else
+  const bool legacyAddress = true;
+  const bool v13Address = true;
+#endif
+
+  const bool passed = freshInitialized && resetPreservedHardware
+                   && loopToggledHardware && legacyAddress && v13Address;
+  std::ostringstream detail;
+  detail << "fresh=" << freshInitialized
+         << ", reset-preserves-led=" << resetPreservedHardware
+         << ", loop-toggles-led=" << loopToggledHardware
+         << ", mux-orders=" << (legacyAddress && v13Address);
+  return reportFirmwareRegression(
+    "boot-led-eeprom",
+    passed,
+    detail.str()
+  );
+}
+}  // namespace
+#endif
+
+#ifdef IDUM_SIM_ELI_OO
+namespace {
+int eliRatchetChannelFourZeroScenario() {
+  resetSimulation();
+  clockChan = iCLOCK {};
+  trigChan1 = iTRIG {};
+  trigChan2 = iTRIG {};
+  trigChan3 = iTRIG {};
+  trigChan4 = iTRIG {};
+  alternateMultiplyMode = false;
+
+  trigChan2.modifyLength = 1;
+  trigChan2.mode = 2;
+  trigChan2.unscaledParam = 15;
+  trigChan2.ratchetAmount = 2;
+  trigChan2.lastInterval = 100000;
+
+  trigChan4.modifyLength = 1;
+  trigChan4.mode = 2;
+  trigChan4.unscaledParam = 15;
+  trigChan4.ratchetAmount = 2;
+  trigChan4.lastInterval = 0;
+
+  std::cout << "RUN   eli-ratchet-channel-4-zero: channel 2 valid, channel 4 unmeasured\n";
+  ratchet();
+  return reportFirmwareRegression(
+    "eli-ratchet-channel-4-zero",
+    !trigChan4.stateOUT,
+    "returned safely with channel 4 off"
+  );
+}
+}  // namespace
+#endif
 
 int main(int argc, char** argv) {
   programPath = argv[0];

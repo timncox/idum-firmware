@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <type_traits>
 
 using byte = uint8_t;
 using boolean = bool;
@@ -40,12 +41,12 @@ using boolean = bool;
 #endif
 
 template <typename T, typename U>
-auto min(T a, U b) -> decltype(a < b ? a : b) {
+typename std::common_type<T, U>::type min(T a, U b) {
   return a < b ? a : b;
 }
 
 template <typename T, typename U>
-auto max(T a, U b) -> decltype(a > b ? a : b) {
+typename std::common_type<T, U>::type max(T a, U b) {
   return a > b ? a : b;
 }
 

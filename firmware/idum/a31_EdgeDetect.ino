@@ -81,6 +81,8 @@ void grabLooperVariables() {
   else loopButtonActiveEdge = 0;
   if (!loopGateActiveOld && loopGateActive) loopGateActiveEdge = 1;
   else loopGateActiveEdge = 0;
+  if (loopGateActiveOld && !loopGateActive) loopGateFallingEdge = 1;
+  else loopGateFallingEdge = 0;
 }
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
