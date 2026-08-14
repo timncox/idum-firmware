@@ -139,6 +139,7 @@ unsigned int even[16] = { 8, 6, 6, 4, 4, 2, 2, 1, 1, 2, 2, 4, 4, 6, 6, 8 } ;
 unsigned int paramResolution = 0;
 unsigned int lengthResolution = 0;
 unsigned int lengthScaled = 0;
+unsigned int mutationLengthScaled = 1;
 unsigned int ratchetAmount = 0;
 
 //////////////////////////////////////////////////////////////////////menu options
@@ -460,6 +461,7 @@ unsigned int loopCycleCount = 0;
 
 bool cycleIn = 0;
 bool loopModulationMode = 0;
+bool loopModulationModeOld = 0;
 bool cycleActivate = 0;
 unsigned long cycleTimeStart = 0;
 unsigned long cycleTimeEnd = 0;

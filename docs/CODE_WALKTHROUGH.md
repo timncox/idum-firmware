@@ -196,9 +196,21 @@ On menu exit, `saveOptions()` persists:
 
 Active modes are saved separately to EEPROM byte `2` whenever modes are toggled.
 
-## Cycle Maintenance
+## Loop Modulation and Cycle Maintenance
 
-The `cycle` switch tries to keep an external sequencer aligned when IDUM changes clock behavior. This code lives mostly in `a91_followUtils.ino` and `a01_timers.ino`.
+In this fork, the physical `CYCLE` switch enables a loop-modulation control
+layer. Raising it latches the current mutation mode and mutation length. The
+live Mode control remains available for loop offset/start, while the live
+Length control remains available for loop end/length. Chance and Param retain
+their normal mutation functions. Lowering the switch restores normal live Mode
+and Length selection for subsequent modifications.
+
+The original external-sequencer alignment behavior is now toggled by setup-menu
+position 0 rather than directly by the physical switch.
+
+External cycle maintenance tries to keep an attached sequencer aligned when
+IDUM changes clock behavior. This code lives mostly in `a91_followUtils.ino`
+and `a01_timers.ino`.
 
 Key behaviors:
 

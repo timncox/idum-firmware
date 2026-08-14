@@ -30,6 +30,7 @@ unsigned int selectCurrentMode();
 void loopModificationHandler();
 void storeCurrentModificationVariables();
 void storeTrigInterruptsInLoop();
+void calculateLooperVariables();
 void trig1InterruptHandler();
 void ratchet();
 void rotate();
@@ -46,6 +47,9 @@ extern bool analogClock;
 #ifdef IDUM_SIM_HAS_LOOP_MODULATION
 extern bool fastExternalSequencerClock;
 extern bool loopModulationMode;
+extern unsigned int mutationLengthScaled;
+void updateLoopModulationLengthLatch();
+unsigned int getMutationLength();
 #endif
 extern bool trigHistory[4][8][4];
 extern unsigned int historyIndex;
@@ -61,6 +65,10 @@ extern bool modificationActive;
 extern bool splitMode;
 extern bool freezeParam;
 extern bool startModification;
+extern bool startModification1;
+extern bool startModification2;
+extern bool startModification3;
+extern bool startModification4;
 extern bool endModification;
 extern bool carryOver;
 extern bool cycleIn;
@@ -78,6 +86,7 @@ extern bool trig3Choke;
 extern bool trig4Choke;
 extern unsigned int intervalCount;
 extern unsigned int lengthScaled;
+extern unsigned int loopLength;
 extern unsigned int loopIndex;
 extern unsigned int originalHistoryIndex;
 extern unsigned int loopRandom;
@@ -966,6 +975,59 @@ int loopModulationModeScenario() {
     return modeStayedLatched && dialStillTracksControl && toggleRead && fastExternalClockDefault && recordingContinues;
   }, "front toggle gates mode mutation without freezing loop capture", "expected mode to latch, raw mode control to track, and rolling capture to continue");
 }
+
+int loopModulationLengthScenario() {
+  return runModeScenario("loop-modulation-length", [] {
+    setLogicalAnalog(20, 0);  //keep probability from starting unrelated modifications
+    setLogicalAnalog(18, 300);
+    runFor(20000);
+    const unsigned int mutationLengthAtEntry = lengthScaled;
+
+    setLogicalGate(17, true);
+    runFor(20000);
+    const bool capturedEntryLength = mutationLengthScaled == mutationLengthAtEntry;
+
+    setLogicalAnalog(18, 1000);
+    runFor(20000);
+    const unsigned int liveLoopLength = lengthScaled;
+
+    loopEnable = true;
+    calculateLooperVariables();
+    const bool loopTracksLiveLength = (liveLoopLength != mutationLengthAtEntry)
+                                      && (loopLength == liveLoopLength);
+    loopEnable = false;
+
+    splitMode = false;
+    carryOver = false;
+    modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 0;
+    startModification = true;
+    activateModification();
+    startModification = false;
+    const bool mutationUsesLatchedLength = modifyLength == mutationLengthAtEntry;
+
+    splitMode = true;
+    modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 0;
+    startModification1 = startModification2 = startModification3 = startModification4 = true;
+    activateModification();
+    startModification1 = startModification2 = startModification3 = startModification4 = false;
+    const bool splitMutationsUseLatchedLength = (modifyLength1 == mutationLengthAtEntry)
+                                                && (modifyLength2 == mutationLengthAtEntry)
+                                                && (modifyLength3 == mutationLengthAtEntry)
+                                                && (modifyLength4 == mutationLengthAtEntry);
+    splitMode = false;
+
+    setLogicalGate(17, false);
+    runFor(20000);
+    modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 0;
+    startModification = true;
+    activateModification();
+    startModification = false;
+    const bool releaseRestoresLiveLength = modifyLength == liveLoopLength;
+
+    return capturedEntryLength && loopTracksLiveLength && mutationUsesLatchedLength
+           && splitMutationsUseLatchedLength && releaseRestoresLiveLength;
+  }, "CYCLE latches mutation length while live LENGTH edits the loop", "expected latched mutation length, live loop length, and normal control after release");
+}
 #endif
 
 int ballScenario() {
@@ -1246,6 +1308,7 @@ int allModesScenario() {
     "trigger-ratchet-divide",
 #ifdef IDUM_SIM_HAS_LOOP_MODULATION
     "loop-modulation-mode",
+    "loop-modulation-length",
 #endif
     "ball",
     "rotate",
@@ -1321,6 +1384,7 @@ int runScenario(const std::string& name) {
   if (name == "trigger-ratchet-divide-steady") return triggerRatchetDivideSteadyScenario();
 #ifdef IDUM_SIM_HAS_LOOP_MODULATION
   if (name == "loop-modulation-mode") return loopModulationModeScenario();
+  if (name == "loop-modulation-length") return loopModulationLengthScenario();
 #endif
   if (name == "ratchet") return triggerRatchetScenario();
   if (name == "ball") return ballScenario();
@@ -1335,7 +1399,7 @@ int runScenario(const std::string& name) {
   if (name == "all-regressions") return allRegressionsScenario();
 
   std::cerr << "Unknown scenario: " << name << '\n';
-  std::cerr << "Available scenarios: smoke, regression-length-1, regression-rotate-split-param, regression-rotate-silent-destination, regression-ball-channel-3-reset, regression-back-to-back-mode, regression-removed-mode-boot, regression-split-loop-empty-step, regression-loop-phase, regression-loop-ratchet-map, regression-ratchet-zero-interval, regression-rng-power-on, hold, clock-ratchet, clock-ratchet-divide, clock-ratchet-sparse-min-length, trigger-ratchet, trigger-ratchet-divide, trigger-ratchet-divide-steady, loop-modulation-mode, ball, rotate, delay, break, clock-stop-burst, break-patterns, break-playback, skip, all-modes, all-regressions\n";
+  std::cerr << "Available scenarios: smoke, regression-length-1, regression-rotate-split-param, regression-rotate-silent-destination, regression-ball-channel-3-reset, regression-back-to-back-mode, regression-removed-mode-boot, regression-split-loop-empty-step, regression-loop-phase, regression-loop-ratchet-map, regression-ratchet-zero-interval, regression-rng-power-on, hold, clock-ratchet, clock-ratchet-divide, clock-ratchet-sparse-min-length, trigger-ratchet, trigger-ratchet-divide, trigger-ratchet-divide-steady, loop-modulation-mode, loop-modulation-length, ball, rotate, delay, break, clock-stop-burst, break-patterns, break-playback, skip, all-modes, all-regressions\n";
   return 2;
 }
 

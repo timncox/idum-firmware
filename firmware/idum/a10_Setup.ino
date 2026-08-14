@@ -32,7 +32,7 @@ void setup() {
 
   randomSeed(gatherEntropy());
 
-  displayFirmwareVersion(4);  //This displays on the mode ring which firmware is loaded on your IDUM.  Increase the number for each update.
+  displayFirmwareVersion(5);  //This displays on the mode ring which firmware is loaded on your IDUM.  Increase the number for each update.
 
 #if IDUM_ADC_DIAGNOSTIC
   Serial.begin(115200);

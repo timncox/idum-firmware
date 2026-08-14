@@ -95,6 +95,20 @@ At a high level:
 4. `a70_handleDisplay.ino` multiplexes the mode LEDs.
 5. `x_utils.ino` handles EEPROM bit packing for options and enabled modes.
 
+## Loop Modulation Switch
+
+This fork repurposes the front-panel `CYCLE` switch as a performance-time loop
+modulation layer. When the switch is raised:
+
+- the current mutation mode and mutation length stay latched;
+- the live Mode control sets the loop offset/start position;
+- the live Length control sets the loop end/length; and
+- Chance and Param keep their normal mutation behavior.
+
+Lowering the switch returns Mode and Length to normal mutation control. The
+external-sequencer cycle-maintenance option that originally occupied the switch
+is available at setup-menu position 0.
+
 See [docs/HARDWARE.md](docs/HARDWARE.md) for hardware notes, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a file map, and [docs/CODE_WALKTHROUGH.md](docs/CODE_WALKTHROUGH.md) for a source-derived explanation of how v0.99 works.
 
 ## Source

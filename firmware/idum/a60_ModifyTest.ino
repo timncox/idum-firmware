@@ -340,6 +340,7 @@ void decideModificationStatus() {
 void activateModification() {
 
   unsigned long currentMicros = micros();  //calculates the current time once only for efficiency
+  unsigned int newModificationLength = getMutationLength();
 
   //even in split mode we test for the "main" modifications to decide if we are modifying the clock.  I will probably make it so that the "main"
   //modification controls both the clock and channel 1 together or at least make that an advanced option.  Because of this the cycle maintenance
@@ -359,7 +360,7 @@ void activateModification() {
     }
 
     //sample the length input and then record what the original length is for later
-    modifyLength = lengthScaled;          //this variable decreases once per clock until it is 0, then the modification ends.
+    modifyLength = newModificationLength; //this variable decreases once per clock until it is 0, then the modification ends.
     originalModifyLength = modifyLength;  //this keeps track of the overall modification length for maintain cycle and some other scaling
 
     //keeps track of the beginning time of the modification for sending out the first clock
@@ -444,7 +445,7 @@ void activateModification() {
         ratchetAmount1 = ratchetAmount;
       }
       //sample the length input and then record what the original length is for later
-      modifyLength1 = lengthScaled;           //this variable decreases once per clock until it is 0, then the modification ends.
+      modifyLength1 = newModificationLength;  //this variable decreases once per clock until it is 0, then the modification ends.
       originalModifyLength1 = modifyLength1;  //this keeps track of the overall modification length for maintain cycle and some other scaling
 
       //Check the individual mode specific variables for bug squashing
@@ -475,7 +476,7 @@ void activateModification() {
         ratchetAmount2 = ratchetAmount;
       }
       //sample the length input and then record what the original length is for later
-      modifyLength2 = lengthScaled;           //this variable decreases once per clock until it is 0, then the modification ends.
+      modifyLength2 = newModificationLength;  //this variable decreases once per clock until it is 0, then the modification ends.
       originalModifyLength2 = modifyLength2;  //this keeps track of the overall modification length for maintain cycle and some other scaling
 
       if (mode2 == 0) hold2Choke = (random(450) < modifyParam);
@@ -505,7 +506,7 @@ void activateModification() {
         ratchetAmount3 = ratchetAmount;
       }
       //sample the length input and then record what the original length is for later
-      modifyLength3 = lengthScaled;           //this variable decreases once per clock until it is 0, then the modification ends.
+      modifyLength3 = newModificationLength;  //this variable decreases once per clock until it is 0, then the modification ends.
       originalModifyLength3 = modifyLength3;  //this keeps track of the overall modification length for maintain cycle and some other scaling
 
       if (mode3 == 0) hold3Choke = (random(450) < modifyParam);
@@ -535,7 +536,7 @@ void activateModification() {
         ratchetAmount4 = ratchetAmount;
       }
       //sample the length input and then record what the original length is for later
-      modifyLength4 = lengthScaled;           //this variable decreases once per clock until it is 0, then the modification ends.
+      modifyLength4 = newModificationLength;  //this variable decreases once per clock until it is 0, then the modification ends.
       originalModifyLength4 = modifyLength4;  //this keeps track of the overall modification length for maintain cycle and some other scaling
 
       if (mode4 == 0) hold4Choke = (random(450) < modifyParam);

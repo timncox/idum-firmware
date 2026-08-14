@@ -12,6 +12,8 @@ void readInputs() {
 
   scaleCVInputs();  //scale the analog CV inputs.
 
+  updateLoopModulationLengthLatch();  //keep mutation length latched while the live control edits the loop
+
   handleFreezeParam();  //record the parameters only once per modification if we are using the freezeParam secret option
 }
 
@@ -119,6 +121,27 @@ void scaleCVInputs() {
 }
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+//The front-panel CYCLE switch is used as a loop modulation layer in this fork.
+//On its rising edge, capture the current mutation length. lengthScaled remains
+//live so the same slider/CV can continue to set the looper's end/length.
+
+void updateLoopModulationLengthLatch() {
+
+  if (loopModulationMode && !loopModulationModeOld) {
+    mutationLengthScaled = lengthScaled;
+  }
+
+  loopModulationModeOld = loopModulationMode;
+}
+
+unsigned int getMutationLength() {
+
+  if (loopModulationMode) return mutationLengthScaled;
+  return lengthScaled;
+}
+
+//////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
 //This function copies the scaled param variables into each channel's modification variables depending on it's modification status.
 //If freeze param is off it just copies the current param variables into each channel's individual variables all the time.
