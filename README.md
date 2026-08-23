@@ -39,6 +39,25 @@ Override the board target like this:
 make build FQBN=arduino:avr:nano
 ```
 
+`make build` produces the production selector firmware with Superlooper as its
+compile-time-selected alternate. The explicit equivalent is:
+
+```sh
+make superlooper-build
+```
+
+Every production build chooses one alternate engine; the finished firmware's
+CYCLE switch always selects between the classic runner (down) and that alternate
+(up). A no-alternate personality exists only in the host simulator as a classic
+behavior oracle.
+
+Generated repeats normally stop after the external clock disappears. To
+deliberately restore v0.99's unbounded behavior for a custom build:
+
+```sh
+make build FIRMWARE_DEFINES=-DIDUM_ENABLE_CLOCK_STOP_TIMEOUT=0
+```
+
 ## Host Simulator
 
 The `sim/` directory contains a small desktop harness that compiles the firmware as ordinary C++ and provides fake Arduino functions for pins, analog reads, EEPROM, time, and random numbers. It is not an ATmega4809 emulator, but it lets us exercise the firmware's normal `setup()` and `loop()` paths and inspect output pin behavior before flashing hardware.
@@ -56,6 +75,20 @@ Run characteristic scenarios for all documented modes:
 ```sh
 make sim-modes
 ```
+
+Run the engine-specific verification batteries:
+
+```sh
+make test-stock-reference
+make test-superlooper
+make test-all
+```
+
+`test-stock-reference` exercises the simulator-only classic reference.
+`test-superlooper` first runs the classic path in both simulator personalities and compares an exact,
+deterministic output/state fingerprint; it then runs the independent
+Superlooper battery with CYCLE up. This makes stock-path drift a test failure
+while allowing Superlooper's tests to change with its intentional semantics.
 
 Inspect Break mode's embedded pattern table, or recreate those patterns through simulated clock and trigger I/O:
 
@@ -90,76 +123,49 @@ make upload PORT=/dev/cu.usbmodem101
 At a high level:
 
 1. `setup()` assigns pins, samples the boot controls, initializes EEPROM, sets interval bookkeeping, attaches trigger interrupts, and displays the startup animation/version.
-2. `loop()` ticks software timers, reads gate/CV inputs, edge-detects events, chooses the active mode, handles looper record/playback, applies modification logic, handles the menu, then writes outputs.
-3. Mode files `b10_...` through `b80_...` implement the eight mutation modes.
-4. `a70_handleDisplay.ino` multiplexes the mode LEDs.
-5. `x_utils.ino` handles EEPROM bit packing for options and enabled modes.
+2. `c00_AlternateEngine.ino` supplies the production `loop()` dispatcher: CYCLE down runs the classic pipeline and CYCLE up runs the selected alternate.
+3. The classic input adapter saves raw CYCLE for dispatch, then places saved menu setting 0 into the legacy `cycleIn` variable before stock looper and mutation functions run.
+4. Mode files `b10_...` through `b80_...` implement the eight mutation modes.
+5. `a70_handleDisplay.ino` multiplexes the mode LEDs.
+6. `x_utils.ino` handles EEPROM bit packing for options and enabled modes.
 
-## Loop Modulation Switch
+## Alternate Engine Framework
 
-This fork repurposes the front-panel `CYCLE` switch as a performance-time loop
-modulation layer. When the switch is raised:
+The stock mode, looper, mutation, and output functions remain free of alternate
+engine conditionals. The production dispatcher uses a small copied top-level
+classic pipeline so it can adapt the repurposed CYCLE control before calling
+those functions. A selected alternate gets its own top-level runner and may copy
+and change more of the state machine as needed while sharing hardware I/O,
+display, EEPROM, utilities, and mutation renderers.
 
-- the current mutation mode and mutation length stay latched;
-- the live Mode control sets the loop offset/start position;
-- the live Length control sets the loop end/length;
-- the live Param control sets loop playback speed while LOOP is active; and
-- Chance keeps its normal mutation behavior.
+The interface is intentionally tiny:
 
-Lowering the switch returns Mode, Length, and Param to normal mutation control. The
-external-sequencer cycle-maintenance option that originally occupied the switch
-is available at setup-menu position 0.
+- `runSelectedAlternateEngine()` executes the selected alternate runner.
+- `resetSelectedAlternateEngine()` starts it fresh at a CYCLE boundary.
+- `IDUM_ALT_ENGINE` selects which alternate is linked into the firmware.
 
-### What happened to the original CYCLE function
+Changing CYCLE is defined as a conceptual reboot of the runner. It is not
+quantized and makes no promise to preserve loop state, modification state, or
+sequencer phase. Musical entry/exit semantics belong to LOOP while an alternate
+runner is already active.
 
-In the stock firmware, the physical CYCLE switch enabled external-sequencer
-cycle/position maintenance: after IDUM added or removed clocks, it emitted
-catch-up clocks intended to return a downstream sequencer to the expected step.
-This fork keeps that behavior, but moves its on/off control to setup-menu
-position 0 so the physical switch can host the loop-modulation performance
-layer.
+### Shared external-sequencer contract
 
-That move displaces the stock setting previously found at menu position 0.
-Originally, position 0 selected fast versus slower “analog clock” timing for
-the catch-up pulses. The menu position now enables or disables cycle
-maintenance itself, and catch-up speed is fixed to the fast behavior by the
-`fastExternalSequencerClock` firmware option.
+CYCLE is never used directly by either sequencing engine. Setup-menu position 0
+enables or disables the legacy external-sequencer cycle/position maintenance in
+both classic and alternate runners. Catch-up pulses use the fast stock path by
+default; `fastExternalSequencerClock` is a rebuild-time source option for anyone
+who needs the slower path. The classic runner otherwise retains the stock clock
+ordering and timing algorithms.
 
-### Setup-menu map
+### Superlooper build
 
-Hold MODE/REMOVE for about one second to enter or leave the setup menu. The Mode
-control selects a ring position; press and release MODE/REMOVE to change that
-position's setting.
-
-| Ring position | Setting |
-| --- | --- |
-| 1 | Toggle the former CYCLE external-sequencer maintenance behavior |
-| 2 | Param resolution: powers of two |
-| 3 | Param resolution: even values |
-| 4 | Param resolution: odd values |
-| 5 | Length resolution: odd values |
-| 6 | Length resolution: even values |
-| 7 | Length resolution: powers of two |
-| 8 | Toggle split mode |
-
-While the setup menu is open, pressing LOOP separately toggles the Loop CV
-between toggle behavior and loop-while-high behavior. Menu choices are saved to
-EEPROM when the menu is exited.
-
-### Post-loop Param pickup
-
-Param also gets a one-shot safety hold when LOOP is turned off while the CYCLE
-performance layer is raised. During LOOP, Param remains free to change loop
-speed. On exit, firmware restores the mutation Param value from before LOOP and
-keeps it frozen until it detects one deliberate movement of the combined Param
-knob/CV signal. Normal Param tracking then resumes from the new position.
-
-This is movement pickup rather than value pickup: the control does not need to
-cross its old value. Small ADC fluctuations are ignored. The hold is armed only
-by leaving LOOP with CYCLE raised; lowering CYCLE cancels it immediately. This
-prevents a loop-speed setting from silently becoming a mutation Param setting
-the instant LOOP is released. The same handoff applies when LOOP ends from the
-button or the Loop CV input, including the menu's loop-while-high behavior.
+`make superlooper-build` currently establishes the independent runner and fresh
+CYCLE boundary. Its new loop semantics will be implemented inside that runner;
+the stock runner will not be modified to accommodate them. Its present test
+battery checks fresh CYCLE transitions and runs all mutation modes through the
+alternate runner. Loop anchoring, control pickup, chance, and post-mutation
+capture tests will be added alongside those behaviors.
 
 ## Boot Controls
 

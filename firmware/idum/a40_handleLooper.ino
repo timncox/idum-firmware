@@ -56,8 +56,6 @@ void determineLooperStatus() {
 
   if (!loopEnableAtStart && loopEnable) {  //run this code if the loop has just turned on
 
-    captureMutationParamForLoop();
-
     //if the 'cycle' switch is high and a modification is happening we run the maintain cycle function.
     if (cycleIn && (modifyLength != 0)) {
       maintainCycle();
@@ -86,8 +84,6 @@ void determineLooperStatus() {
 
   //run this code if the looper just turned off
   if (loopEnableAtStart && !loopEnable) {
-    armMutationParamPickupAfterLoop();
-
     if (cycleIn) {
       loopCycle();  //if the cycle switch is on we run a specialized cycle function for the looper
     }

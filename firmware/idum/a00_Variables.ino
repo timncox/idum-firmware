@@ -145,12 +145,11 @@ unsigned int even[16] = { 8, 6, 6, 4, 4, 2, 2, 1, 1, 2, 2, 4, 4, 6, 6, 8 } ;
 unsigned int paramResolution = 0;
 unsigned int lengthResolution = 0;
 unsigned int lengthScaled = 0;
-unsigned int mutationLengthScaled = 1;
 unsigned int ratchetAmount = 0;
 
 //////////////////////////////////////////////////////////////////////menu options
 
-bool analogClock = 0;
+bool externalSequencerTracking = 0;
 bool doubleLength = 0 ; //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<needs to be implemented
 bool splitMode = 0;     //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<needs to be implemented
 
@@ -467,13 +466,6 @@ unsigned int loopCycleCount = 0;
 ////////////////////////////////////////////////////////////follow stuff
 
 bool cycleIn = 0;
-bool loopModulationMode = 0;
-bool loopModulationModeOld = 0;
-bool loopParamPickupActive = 0;
-unsigned int loopParamPickupReference = 0;
-unsigned int mutationParamHeld = 0;
-unsigned int mutationUnscaledParamHeld = 0;
-unsigned int mutationRatchetAmountHeld = 1;
 bool cycleActivate = 0;
 unsigned long cycleTimeStart = 0;
 unsigned long cycleTimeEnd = 0;

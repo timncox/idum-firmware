@@ -58,7 +58,7 @@ byte getOptionByte() {
 
   byte optionByte = 0;
 
-  bitWrite(optionByte, 0, analogClock);
+  bitWrite(optionByte, 0, externalSequencerTracking);
   bitWrite(optionByte, 1, splitMode);
   bitWrite(optionByte, 2, doubleLength);
   bitWrite(optionByte, 3, loopInputBehavior);
@@ -88,7 +88,7 @@ void saveOptions() {
 
 void setOptions(byte optionByte) {
 
-  analogClock = bitRead(optionByte, 0);
+  externalSequencerTracking = bitRead(optionByte, 0);
   splitMode = bitRead(optionByte, 1);
   doubleLength = bitRead(optionByte, 2);
   loopInputBehavior = bitRead(optionByte, 3);

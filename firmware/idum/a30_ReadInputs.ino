@@ -10,11 +10,7 @@ void readInputs() {
 
   readAnalogInputs();  //grab the value of all analog CV inputs.
 
-  updateLoopModulationParamPickup();  //hold mutation Param after leaving LOOP until the control actually moves
-
   scaleCVInputs();  //scale the analog CV inputs.
-
-  updateLoopModulationLengthLatch();  //keep mutation length latched while the live control edits the loop
 
   handleFreezeParam();  //record the parameters only once per modification if we are using the freezeParam secret option
 }
@@ -32,8 +28,7 @@ void readGateInputs() {
   trig3In = !digitalReadFast(trig3Pin);
   trig4In = !digitalReadFast(trig4Pin);
 
-  loopModulationMode = !digitalReadFast(cycleSw);
-  cycleIn = analogClock;
+  cycleIn = !digitalReadFast(cycleSw);
   loopGateIn = !digitalReadFast(loopGate);
   loopButtonIn = !digitalReadFast(loopButton);
 
@@ -58,59 +53,6 @@ void readAnalogInputs() {
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
-void applyMutationParamHold() {
-  modifyParam = mutationParamHeld;
-  unscaledParam = mutationUnscaledParamHeld;
-  ratchetAmount = mutationRatchetAmountHeld;
-
-  modifyParam1 = modifyParam2 = modifyParam3 = modifyParam4 = mutationParamHeld;
-  unscaledParam1 = unscaledParam2 = unscaledParam3 = unscaledParam4 = mutationUnscaledParamHeld;
-  ratchetAmount1 = ratchetAmount2 = ratchetAmount3 = ratchetAmount4 = mutationRatchetAmountHeld;
-}
-
-void captureMutationParamForLoop() {
-  mutationParamHeld = modifyParam;
-  mutationUnscaledParamHeld = unscaledParam;
-  mutationRatchetAmountHeld = ratchetAmount;
-  loopParamPickupActive = 0;
-}
-
-void armMutationParamPickupAfterLoop() {
-  if (!loopModulationMode) {
-    loopParamPickupActive = 0;
-    return;
-  }
-
-  loopParamPickupReference = paramRead;
-  loopParamPickupActive = 1;
-  applyMutationParamHold();
-}
-
-void updateLoopModulationParamPickup() {
-  if (!loopParamPickupActive) return;
-
-  //Dropping CYCLE explicitly returns every control to normal tracking.
-  if (!loopModulationMode) {
-    loopParamPickupActive = 0;
-    return;
-  }
-
-  unsigned int movement = (paramRead > loopParamPickupReference)
-                        ? paramRead - loopParamPickupReference
-                        : loopParamPickupReference - paramRead;
-
-  if (movement > loopParamPickupMovementThreshold) {
-    loopParamPickupActive = 0;
-    return;
-  }
-
-  applyMutationParamHold();
-}
-
-unsigned int getMutationParamReading() {
-  if (loopParamPickupActive) return mutationParamHeld;
-  return paramRead;
-}
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
@@ -180,24 +122,7 @@ void scaleCVInputs() {
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
-//The front-panel CYCLE switch is used as a loop modulation layer in this fork.
-//On its rising edge, capture the current mutation length. lengthScaled remains
-//live so the same slider/CV can continue to set the looper's end/length.
 
-void updateLoopModulationLengthLatch() {
-
-  if (loopModulationMode && !loopModulationModeOld) {
-    mutationLengthScaled = lengthScaled;
-  }
-
-  loopModulationModeOld = loopModulationMode;
-}
-
-unsigned int getMutationLength() {
-
-  if (loopModulationMode) return mutationLengthScaled;
-  return lengthScaled;
-}
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 

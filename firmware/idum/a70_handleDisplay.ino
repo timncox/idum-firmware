@@ -188,7 +188,7 @@ void calculateActiveLED() {
         switch (modeCounter) {  //select the next active LED based on which LED we currently are displaying
 
           case 0:
-            if (analogClock) {             //if an option is active
+            if (externalSequencerTracking) {  //if external sequencer tracking is active
               skipOption = 0;              //exit the 'while' loop
               LEDCounter = menuModeCount;  //set the LED counter to a predetermined number
               break;                       //restart the loop

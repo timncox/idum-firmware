@@ -112,6 +112,11 @@
 #include "fastdigitalIO.h"
 #include <EEPROM.h>
 #include "arduino-timer.h"
+#include "engine_config.h"
+
+#if IDUM_ALT_ENGINE != IDUM_ALT_ENGINE_NONE
+#define loop runStockEngine
+#endif
 
 #ifndef IDUM_ADC_DIAGNOSTIC
 #define IDUM_ADC_DIAGNOSTIC 0

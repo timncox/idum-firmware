@@ -57,7 +57,9 @@ void errorChecking() {
     if (modifyLength4 < 0) modifyLength4 = 0;
   }
 
+#if IDUM_ENABLE_CLOCK_STOP_TIMEOUT
   handleClockTimeout();
+#endif
 
   startModification = startModification1 = startModification2 = startModification3 = startModification4 = 0;
   endModification = endModification1 = endModification2 = endModification3 = endModification4 = 0;  //reset some flags
@@ -68,12 +70,10 @@ void errorChecking() {
 //End active generated-repeat modifications when the external clock is no longer arriving.
 //Without this, these modes can keep deriving pulses from the last measured interval forever.
 
+#if IDUM_ENABLE_CLOCK_STOP_TIMEOUT
+
 bool isClockTimeoutMode(unsigned int currentMode) {
   return (currentMode == 1) || (currentMode == 2) || (currentMode == 6);
-}
-
-bool isGeneratedTriggerCarryOverMode(unsigned int currentMode) {
-  return (currentMode == 1) || (currentMode == 2);
 }
 
 void handleClockTimeout() {
@@ -129,6 +129,12 @@ void handleClockTimeout() {
     modificationActive = 0;
     carryOverActive = 0;
   }
+}
+
+#endif
+
+bool isGeneratedTriggerCarryOverMode(unsigned int currentMode) {
+  return (currentMode == 1) || (currentMode == 2);
 }
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
@@ -340,7 +346,7 @@ void decideModificationStatus() {
 void activateModification() {
 
   unsigned long currentMicros = micros();  //calculates the current time once only for efficiency
-  unsigned int newModificationLength = getMutationLength();
+  unsigned int newModificationLength = lengthScaled;
 
   //even in split mode we test for the "main" modifications to decide if we are modifying the clock.  I will probably make it so that the "main"
   //modification controls both the clock and channel 1 together or at least make that an advanced option.  Because of this the cycle maintenance
@@ -350,7 +356,7 @@ void activateModification() {
 
     //Check for the freeze param flag
     if (freezeParam) {
-      modifyParam = getMutationParamReading();  //respect the one-shot post-loop Param hold
+      modifyParam = paramRead;
 
       //and then we copy the modify parameters into each channel's individual variables.
       //Any modifications that activate at the same time will have the same modification variables.
@@ -440,7 +446,7 @@ void activateModification() {
     if (startModification1) {  //if we are starting a new modification
       mode1 = chooseMode();    //we check the mode again just to be sure
       if (freezeParam) {
-        modifyParam1 = getMutationParamReading();  //respect the one-shot post-loop Param hold
+        modifyParam1 = paramRead;
         unscaledParam1 = unscaledParam;
         ratchetAmount1 = ratchetAmount;
       }
@@ -471,7 +477,7 @@ void activateModification() {
     if (startModification2) {
       mode2 = chooseMode();
       if (freezeParam) {
-        modifyParam2 = getMutationParamReading();  //respect the one-shot post-loop Param hold
+        modifyParam2 = paramRead;
         unscaledParam2 = unscaledParam;
         ratchetAmount2 = ratchetAmount;
       }
@@ -501,7 +507,7 @@ void activateModification() {
     if (startModification3) {
       mode3 = chooseMode();
       if (freezeParam) {
-        modifyParam3 = getMutationParamReading();  //respect the one-shot post-loop Param hold
+        modifyParam3 = paramRead;
         unscaledParam3 = unscaledParam;
         ratchetAmount3 = ratchetAmount;
       }
@@ -531,7 +537,7 @@ void activateModification() {
     if (startModification4) {
       mode4 = chooseMode();
       if (freezeParam) {
-        modifyParam4 = getMutationParamReading();  //respect the one-shot post-loop Param hold
+        modifyParam4 = paramRead;
         unscaledParam4 = unscaledParam;
         ratchetAmount4 = ratchetAmount;
       }

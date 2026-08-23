@@ -78,7 +78,12 @@ void storeCurrentTriggersOnClockEdge() {
 //A somewhat imperfect solution for more accurate trigger recording.  In the next firmware update the input triggers will drive everything
 //using external interrupts to make all trigger input timings more accurate.
 
-bool consumeLoopRecord(volatile bool *flag, volatile unsigned long *timestamp, unsigned long *snapshot) {
+inline __attribute__((always_inline)) bool consumeLoopRecord(volatile bool *flag, volatile unsigned long *timestamp, unsigned long *snapshot) {
+  // The usual case is an empty mailbox. If an interrupt arrives after this
+  // unlocked check, it remains pending for the next pass. Only a mailbox that
+  // looked occupied needs the atomic recheck/copy/clear below.
+  if (!*flag) return false;
+
   noInterrupts();
   bool pending = *flag;
   if (pending) {

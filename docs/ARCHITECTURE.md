@@ -21,7 +21,12 @@ The firmware is a multi-tab Arduino sketch. Arduino concatenates the `.ino` file
 - attaches rising-edge interrupts for trigger inputs 1-4
 - starts the display timer
 
-`loop()` lives in `a20_Loop.ino` and runs this pipeline:
+The production `loop()` lives in `c00_AlternateEngine.ino` and dispatches
+between the classic runner and one compile-time-selected alternate. The
+classic runner duplicates only the top-level pipeline from `a20_Loop.ino`; its
+input adapter captures raw CYCLE for dispatch and then substitutes saved menu
+setting 0 before calling the stock looper and mutation functions. That pipeline
+runs:
 
 1. Tick clock/display software timers.
 2. `readInputs()` samples gate, button, switch, and CV inputs.
@@ -60,7 +65,41 @@ The firmware is a multi-tab Arduino sketch. Arduino concatenates the `.ino` file
 - `b60_delayMode.ino` - delay mode.
 - `b70_breakMode.ino` - break mode.
 - `b80_skipMode.ino` - skip mode.
+- `c00_AlternateEngine.ino` - compile-time selection of one alternate runner.
+- `c10_SuperlooperEngine.ino` - independent Superlooper runner and reset boundary.
+- `engine_config.h` - alternate engine IDs and the production alternate default.
 - `x_utils.ino` - EEPROM packing/unpacking helpers.
+
+## Alternate Runner Boundary
+
+Every production build contains the classic runner plus exactly one
+compile-time-selected alternate. The physical CYCLE switch always selects
+between them. Menu position 0 independently enables the legacy
+external-sequencer tracking/catch-up behavior in either runner, and
+`fastExternalSequencerClock` selects its pulse speed at rebuild time (fast by
+default). A CYCLE transition resets the alternate boundary and deliberately
+provides no phase or state handoff guarantee.
+
+Alternates may duplicate the state-machine functions they need, but share the
+hardware, display, persistence, utility, and mutation-mode primitives. A literal
+second copy of the entire firmware would not fit in ATmega4809 flash.
+
+## Verification Contract
+
+The two runners have separate test contracts:
+
+- `make test-stock-reference` runs the bug-fix regression suite and all classic
+  mode scenarios against the simulator-only no-alternate oracle.
+- `make test-superlooper` compares an exact deterministic stock-runner
+  fingerprint between the stock-only and Superlooper binaries, then runs the
+  alternate-specific battery with CYCLE up.
+- `make test-all` runs both contracts.
+
+The stock fingerprint is deliberately stricter than checking that scenarios
+merely pass: the observed output writes and selected internal state must remain
+identical when an alternate engine is compiled beside the stock runner. The
+Superlooper battery is independent so its expected behavior can evolve without
+weakening that isolation check.
 
 ## Hardware Notes To Verify
 
@@ -73,4 +112,3 @@ The imported source defines:
 - LEDs: `loopLED=1`, `mode1LED=2`, `mode2LED=3`, `mode3LED=4`
 
 The pin numbering and interrupt usage suggest the production build may target an Arduino Nano Every / ATmega4809-compatible core. Confirm this before flashing hardware.
-

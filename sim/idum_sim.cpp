@@ -3,6 +3,7 @@
 
 #include "Arduino.h"
 #include "EEPROM.h"
+#include "engine_config.h"
 
 #include <algorithm>
 #include <array>
@@ -21,6 +22,11 @@ EEPROMClass EEPROM;
 
 void setup();
 void loop();
+void runStockEngine();
+void runSelectedAlternateEngine();
+void resetSelectedAlternateEngine();
+void runSuperlooperEngine();
+void resetSuperlooperEngine();
 void adcDiagnosticLoop();
 void modifyTest();
 void activateModification();
@@ -44,10 +50,9 @@ extern const int breakBeat1[16][4][16];
 #else
 extern int breakBeat1[16][4][16];
 #endif
-extern bool analogClock;
-#ifdef IDUM_SIM_HAS_LOOP_MODULATION
-extern bool fastExternalSequencerClock;
-extern bool loopModulationMode;
+extern bool externalSequencerTracking;
+extern const bool fastExternalSequencerClock;
+#ifdef IDUM_SIM_HAS_LEGACY_LOOP_MODULATION
 extern unsigned int mutationLengthScaled;
 extern bool loopParamPickupActive;
 extern unsigned int loopParamPickupReference;
@@ -82,6 +87,10 @@ extern bool startModification4;
 extern bool endModification;
 extern bool carryOver;
 extern bool cycleIn;
+#if IDUM_ALT_ENGINE != IDUM_ALT_ENGINE_NONE
+extern bool cycleSwitchIn;
+extern bool alternateEngineActive;
+#endif
 extern bool trig1In;
 extern bool trig2In;
 extern bool trig3In;
@@ -160,6 +169,7 @@ std::array<uint8_t, 32> lastLoggedPins {};
 std::array<int, 32> analogPins {};
 std::vector<PinWrite> writes;
 std::string programPath;
+bool forceAlternateRunner = false;
 bool simInterruptsEnabled = true;
 std::function<void()> interruptEnableHook;
 
@@ -368,6 +378,21 @@ int runModeScenario(
 ) {
   resetSimulation();
   setup();
+
+#if IDUM_ALT_ENGINE != IDUM_ALT_ENGINE_NONE
+  if (forceAlternateRunner) {
+    setLogicalGate(17, true);
+    loop();
+    advanceMicros(100);
+    loop();
+    advanceMicros(100);
+    if (!alternateEngineActive) {
+      std::cerr << "FAIL " << name << ": alternate runner did not activate\n";
+      return 1;
+    }
+  }
+#endif
+
   writes.clear();
 
   if (!scenario()) {
@@ -558,6 +583,104 @@ int backToBackModeRegressionScenario() {
     mode == 5,
     "new dial mode=5, activated mode=" + std::to_string(mode)
   );
+}
+
+int alternateEngineBoundaryRegressionScenario() {
+  resetSimulation();
+  setup();
+
+  loopEnable = true;
+  modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 3;
+  modificationActive = true;
+
+  setLogicalGate(17, true);
+  loop();
+
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_NONE
+  const bool enteredAsStockCycle = cycleIn;
+  return reportFirmwareRegression(
+    "alternate-engine-boundary",
+    enteredAsStockCycle,
+    "stock CYCLE=" + std::to_string(cycleIn)
+  );
+#else
+  const bool enteredFresh = alternateEngineActive
+                         && !loopEnable && !modificationActive
+                         && modifyLength == 0 && modifyLength1 == 0
+                         && modifyLength2 == 0 && modifyLength3 == 0
+                         && modifyLength4 == 0;
+
+  loopEnable = true;
+  modifyLength = 2;
+  modificationActive = true;
+  setLogicalGate(17, false);
+  loop();
+
+  const bool leftFresh = !alternateEngineActive
+                      && !loopEnable && !modificationActive
+                      && modifyLength == 0;
+
+  return reportFirmwareRegression(
+    "alternate-engine-boundary",
+    enteredFresh && leftFresh,
+    "fresh enter/exit=" + std::to_string(enteredFresh)
+      + "/" + std::to_string(leftFresh)
+  );
+#endif
+}
+
+int alternateClockTrackingContractRegressionScenario() {
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_NONE
+  return reportFirmwareRegression(
+    "alternate-clock-tracking-contract",
+    false,
+    "no alternate engine compiled"
+  );
+#else
+  resetSimulation();
+  setup();
+
+  // CYCLE down selects classic. Its legacy cycleIn checks must see setting 0,
+  // not the physical switch.
+  setLogicalGate(17, false);
+  externalSequencerTracking = true;
+  loop();
+  const bool classicTracksWhenEnabled = !alternateEngineActive
+                                      && !cycleSwitchIn && cycleIn;
+
+  externalSequencerTracking = false;
+  loop();
+  const bool classicStopsWhenDisabled = !alternateEngineActive
+                                     && !cycleSwitchIn && !cycleIn;
+
+  // CYCLE up changes runners only. The alternate receives the same setting 0
+  // interpretation after its intentionally fresh transition boundary.
+  externalSequencerTracking = true;
+  setLogicalGate(17, true);
+  loop();
+  loop();
+  const bool alternateTracksWhenEnabled = alternateEngineActive
+                                       && cycleSwitchIn && cycleIn;
+
+  externalSequencerTracking = false;
+  loop();
+  const bool alternateStopsWhenDisabled = alternateEngineActive
+                                      && cycleSwitchIn && !cycleIn;
+
+  const bool fixedFastClockPolicy = fastExternalSequencerClock;
+
+  return reportFirmwareRegression(
+    "alternate-clock-tracking-contract",
+    classicTracksWhenEnabled && classicStopsWhenDisabled
+      && alternateTracksWhenEnabled && alternateStopsWhenDisabled
+      && fixedFastClockPolicy,
+    "classic=" + std::to_string(classicTracksWhenEnabled)
+      + "/" + std::to_string(classicStopsWhenDisabled)
+      + " alternate=" + std::to_string(alternateTracksWhenEnabled)
+      + "/" + std::to_string(alternateStopsWhenDisabled)
+      + " fast=" + std::to_string(fixedFastClockPolicy)
+  );
+#endif
 }
 
 int removedModeBootRegressionScenario() {
@@ -966,7 +1089,7 @@ int triggerRatchetDivideSteadyScenario() {
   }, "left-side PARAM changes a steady trigger stream", "expected divided ratchet mode to alter, not merely pass through, eight steady input triggers");
 }
 
-#ifdef IDUM_SIM_HAS_LOOP_MODULATION
+#ifdef IDUM_SIM_HAS_LEGACY_LOOP_MODULATION
 int loopModulationModeScenario() {
   return runModeScenario("loop-modulation-mode", [] {
     setModeCv(1);
@@ -1427,11 +1550,6 @@ int allModesScenario() {
     "clock-ratchet-divide",
     "trigger-ratchet",
     "trigger-ratchet-divide",
-#ifdef IDUM_SIM_HAS_LOOP_MODULATION
-    "loop-modulation-mode",
-    "loop-modulation-length",
-    "loop-modulation-param-pickup",
-#endif
     "ball",
     "rotate",
     "delay",
@@ -1449,6 +1567,115 @@ int allModesScenario() {
   return 0;
 }
 
+int allAlternateModesScenario() {
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_NONE
+  std::cerr << "FAIL all-alternate-modes: no alternate engine is compiled\n";
+  return 1;
+#else
+  const std::vector<std::string> scenarios = {
+    "alternate-hold",
+    "alternate-clock-ratchet",
+    "alternate-clock-ratchet-divide",
+    "alternate-trigger-ratchet",
+    "alternate-trigger-ratchet-divide",
+    "alternate-ball",
+    "alternate-rotate",
+    "alternate-delay",
+    "alternate-break",
+    "alternate-skip",
+  };
+
+  for (const auto& scenario : scenarios) {
+    const int result = runChildScenario(scenario);
+    if (result != 0) return result;
+  }
+
+  std::cout << "PASS all-alternate-modes\n";
+  return 0;
+#endif
+}
+
+uint64_t mixFingerprintByte(uint64_t hash, uint8_t value) {
+  return (hash ^ value) * UINT64_C(1099511628211);
+}
+
+uint64_t mixFingerprintWord(uint64_t hash, uint64_t value) {
+  for (unsigned int i = 0; i < 8; ++i) {
+    hash = mixFingerprintByte(hash, static_cast<uint8_t>(value & 0xff));
+    value >>= 8;
+  }
+  return hash;
+}
+
+int stockEngineFingerprintScenario() {
+  resetSimulation();
+  setup();
+
+  setLogicalGate(17, false);  //the stock runner must own this entire trace
+  setLogicalAnalog(20, 1024);
+  setLogicalAnalog(18, 520);
+  setLogicalAnalog(19, 700);
+  setModeCv(0);
+  runFor(20000);
+  writes.clear();
+
+  establishClockInterval();
+  establishTriggerIntervals();
+
+  for (unsigned int selectedMode = 0; selectedMode < 8; ++selectedMode) {
+    setModeCv(selectedMode);
+    setLogicalAnalog(19, 100 + selectedMode * 110);
+    setLogicalAnalog(18, 120 + selectedMode * 100);
+    runFor(20000);
+    runClockAndTriggerTrain(3, 125000);
+  }
+
+  //Include ordinary loop entry/playback/exit in the shared-stock contract.
+  pulseGate(16, 5000, 100);
+  runClockAndTriggerTrain(5, 125000);
+  pulseGate(16, 5000, 100);
+  runClockAndTriggerTrain(2, 125000);
+
+  uint64_t fingerprint = UINT64_C(1469598103934665603);
+  for (const auto& write : writes) {
+    fingerprint = mixFingerprintWord(fingerprint, write.time);
+    fingerprint = mixFingerprintByte(fingerprint, write.pin);
+    fingerprint = mixFingerprintByte(fingerprint, write.value);
+  }
+
+  fingerprint = mixFingerprintWord(fingerprint, mode);
+  fingerprint = mixFingerprintWord(fingerprint, loopIndex);
+  fingerprint = mixFingerprintWord(fingerprint, historyIndex);
+  fingerprint = mixFingerprintWord(fingerprint, modifyLength);
+  fingerprint = mixFingerprintByte(fingerprint, loopEnable);
+  fingerprint = mixFingerprintByte(fingerprint, modificationActive);
+
+  std::cout << "stock-fingerprint=" << std::hex << fingerprint << std::dec
+            << " writes=" << writes.size() << '\n';
+  return 0;
+}
+
+int allSuperlooperRegressionsScenario() {
+#if IDUM_ALT_ENGINE != IDUM_ALT_ENGINE_SUPERLOOPER
+  std::cerr << "FAIL all-superlooper-regressions: Superlooper is not compiled\n";
+  return 1;
+#else
+  const std::vector<std::string> scenarios = {
+    "regression-alternate-engine-boundary",
+    "regression-alternate-clock-tracking-contract",
+    "all-alternate-modes",
+  };
+
+  for (const auto& scenario : scenarios) {
+    const int result = runChildScenario(scenario);
+    if (result != 0) return result;
+  }
+
+  std::cout << "PASS all-superlooper-regressions\n";
+  return 0;
+#endif
+}
+
 int allRegressionsScenario() {
   const std::vector<std::string> scenarios = {
     "regression-runner-status",
@@ -1461,6 +1688,7 @@ int allRegressionsScenario() {
     "regression-rotate-silent-destination",
     "regression-ball-channel-3-reset",
     "regression-back-to-back-mode",
+    "regression-alternate-engine-boundary",
     "regression-removed-mode-boot",
     "regression-split-loop-empty-step",
     "regression-loop-phase",
@@ -1482,6 +1710,12 @@ int allRegressionsScenario() {
 }
 
 int runScenario(const std::string& name) {
+  const std::string alternatePrefix = "alternate-";
+  if (name.compare(0, alternatePrefix.size(), alternatePrefix) == 0) {
+    forceAlternateRunner = true;
+    return runScenario(name.substr(alternatePrefix.size()));
+  }
+
   if (name == "smoke") return smokeScenario();
 #if defined(IDUM_SIM_ELI_OO) || defined(IDUM_SIM_HAS_BOOT_RESET)
   if (name == "boot-led-eeprom") return bootResetScenario();
@@ -1500,6 +1734,8 @@ int runScenario(const std::string& name) {
   if (name == "regression-rotate-silent-destination") return rotateSilentDestinationRegressionScenario();
   if (name == "regression-ball-channel-3-reset") return ballChannelThreeResetRegressionScenario();
   if (name == "regression-back-to-back-mode") return backToBackModeRegressionScenario();
+  if (name == "regression-alternate-engine-boundary") return alternateEngineBoundaryRegressionScenario();
+  if (name == "regression-alternate-clock-tracking-contract") return alternateClockTrackingContractRegressionScenario();
   if (name == "regression-removed-mode-boot") return removedModeBootRegressionScenario();
   if (name == "regression-split-loop-empty-step") return splitLoopEmptyStepRegressionScenario();
   if (name == "regression-loop-phase") return loopPhaseAlignmentRegressionScenario();
@@ -1513,7 +1749,7 @@ int runScenario(const std::string& name) {
   if (name == "trigger-ratchet") return triggerRatchetScenario();
   if (name == "trigger-ratchet-divide") return triggerRatchetDivideScenario();
   if (name == "trigger-ratchet-divide-steady") return triggerRatchetDivideSteadyScenario();
-#ifdef IDUM_SIM_HAS_LOOP_MODULATION
+#ifdef IDUM_SIM_HAS_LEGACY_LOOP_MODULATION
   if (name == "loop-modulation-mode") return loopModulationModeScenario();
   if (name == "loop-modulation-length") return loopModulationLengthScenario();
   if (name == "loop-modulation-param-pickup") return loopModulationParamPickupScenario();
@@ -1528,6 +1764,9 @@ int runScenario(const std::string& name) {
   if (name == "break-playback") return breakPlaybackScenario();
   if (name == "skip") return skipScenario();
   if (name == "all-modes") return allModesScenario();
+  if (name == "all-alternate-modes") return allAlternateModesScenario();
+  if (name == "stock-fingerprint") return stockEngineFingerprintScenario();
+  if (name == "all-superlooper-regressions") return allSuperlooperRegressionsScenario();
   if (name == "all-regressions") return allRegressionsScenario();
 
   std::cerr << "Unknown scenario: " << name << '\n';
@@ -1769,6 +2008,8 @@ void scatter();
 #include "b60_delayMode.ino"
 #include "b70_breakMode.ino"
 #include "b80_skipMode.ino"
+#include "c00_AlternateEngine.ino"
+#include "c10_SuperlooperEngine.ino"
 #ifdef IDUM_SIM_ID00M
 #include "b81_contaminationMode.ino"
 #include "b82_scatterMode.ino"

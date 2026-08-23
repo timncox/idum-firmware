@@ -182,7 +182,7 @@ The looper is not a simple gate repeater; it is closer to an eight-step, four-ti
 
 Holding the mode button for about one second toggles menu mode. While in menu mode:
 
-- mode position 0 toggles `analogClock`
+- mode position 0 toggles `externalSequencerTracking`
 - positions 1-3 set parameter resolution
 - positions 4-6 set length resolution
 - position 7 toggles `splitMode`
@@ -196,17 +196,17 @@ On menu exit, `saveOptions()` persists:
 
 Active modes are saved separately to EEPROM byte `2` whenever modes are toggled.
 
-## Loop Modulation and Cycle Maintenance
+## Alternate Runners and Cycle Maintenance
 
-In this fork, the physical `CYCLE` switch enables a loop-modulation control
-layer. Raising it latches the current mutation mode and mutation length. The
-live Mode control remains available for loop offset/start, while the live
-Length control remains available for loop end/length. Chance and Param retain
-their normal mutation functions. Lowering the switch restores normal live Mode
-and Length selection for subsequent modifications.
-
-The original external-sequencer alignment behavior is now toggled by setup-menu
-position 0 rather than directly by the physical switch.
+Every production build adds one independent runner selected at compile time.
+`c00_AlternateEngine.ino` defines the dispatching `loop()`: CYCLE down chooses
+the classic runner and CYCLE up chooses the alternate. A narrow classic input
+adapter preserves raw CYCLE for that decision, then maps menu setting 0 into the
+legacy `cycleIn` variable before any stock looper or mutation logic executes.
+The alternate applies the same mapping. Catch-up speed is a separate rebuild
+option, `fastExternalSequencerClock`, and defaults to fast. CYCLE transition is
+intentionally a fresh boundary rather than a synchronized handoff; LOOP
+transitions inside the alternate runner carry the musical semantics.
 
 External cycle maintenance tries to keep an attached sequencer aligned when
 IDUM changes clock behavior. This code lives mostly in `a91_followUtils.ino`

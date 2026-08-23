@@ -103,7 +103,7 @@ void loopCycle() {
 
 void skipSteps(unsigned int numSkips) {
 
-  if (fastExternalSequencerClock) { //if we are in the faster clock speed
+  if (fastExternalSequencerClock) {  //if we are in the faster clock speed
     digitalWrite(clockOut, HIGH);  //make absolutely sure that the clock output is low
     digitalWrite(clockOut, HIGH);
     digitalWrite(clockOut, HIGH);

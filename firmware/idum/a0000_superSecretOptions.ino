@@ -45,7 +45,7 @@ bool carryOverDisable = 0;    //default = 0
 //External sequencer clock manipulation speed.
 //This fork assumes attached sequencers can handle IDUM's fast clock manipulation behavior.
 
-bool fastExternalSequencerClock = 1; //default = 1
+const bool fastExternalSequencerClock = 1; //default = 1; rebuild to change
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
@@ -65,12 +65,6 @@ bool rearmGeneratedTriggerChokesOnCarryOver = 1; //default = 1
 bool LEDTweakSetEEPROM = 1; //default = 1 for hardware v1.3 and later
 bool LEDTweak = 1;
 
-//After leaving LOOP while the CYCLE performance layer is active, ignore small
-//Param ADC changes until the combined knob/CV signal actually moves. This keeps
-//normal ADC noise from releasing the one-shot mutation Param hold.
-
-unsigned int loopParamPickupMovementThreshold = 12;
-
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
 //Probability behavior.  Lowering probabilityLowerThreshold lets the bottom of the Chance slider produce tiny amounts of randomness.
@@ -86,6 +80,12 @@ unsigned int probabilityLengthPenalty = 90;    //default = 90
 //Generated clock/ratchet behavior.
 //IDUM cannot know a clock has stopped until the next expected pulse does not arrive.  These values control how long generated-repeat modes
 //are allowed to keep running after the most recent clock before they release back to pass-through.
+
+//Set IDUM_ENABLE_CLOCK_STOP_TIMEOUT=0 at build time to restore v0.99's
+//unbounded generated-repeat behavior after the external clock stops.
+#ifndef IDUM_ENABLE_CLOCK_STOP_TIMEOUT
+#define IDUM_ENABLE_CLOCK_STOP_TIMEOUT 1
+#endif
 
 unsigned int clockStopTimeoutIntervals = 2;          //default = 2 missed clock intervals
 unsigned long clockStopMinimumMicros = 100000;       //default = 100ms, mostly affects very fast clocks
