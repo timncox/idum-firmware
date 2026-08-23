@@ -74,28 +74,41 @@ runs:
 
 Every production build contains the classic runner plus exactly one
 compile-time-selected alternate. The physical CYCLE switch always selects
-between them. Menu position 0 independently enables the legacy
-external-sequencer tracking/catch-up behavior in either runner, and
-`fastExternalSequencerClock` selects its pulse speed at rebuild time (fast by
-default). A CYCLE transition resets the alternate boundary and deliberately
+between them. Menu position 0 enables legacy cycle maintenance in the classic
+runner and loop-position tracking/catch-up in Superlooper.
+`fastExternalSequencerClock` selects catch-up pulse speed at rebuild time (fast
+by default). A CYCLE transition resets the alternate boundary and deliberately
 provides no phase or state handoff guarantee.
 
 Alternates may duplicate the state-machine functions they need, but share the
 hardware, display, persistence, utility, and mutation-mode primitives. A literal
 second copy of the entire firmware would not fit in ATmega4809 flash.
 
-Superlooper currently owns its input-control routing and looper coordination in
-`c10_SuperlooperEngine.ino`. It reuses the calibrated ADC scaling, history
-arrays, modification playback, output modes, and external-sequencer helpers,
-but does not add conditionals to the classic looper.
+Superlooper owns its input-control routing, N-divided sequencer transport,
+rendered tape, and looper coordination in `c10_SuperlooperEngine.ino`. It reuses
+calibrated ADC scaling and the stock mutation renderers, but does not add
+conditionals to the classic looper. Raw CLOCK IN remains the mutation clock.
+Only CLOCK OUT and the duration of a captured loop stage use N.
 
-Its loop window is expressed relative to the newest captured history cell:
-offset zero is the anchor and a length `L` begins at `1-L`. Thus `L=4` walks
-relative positions `-3,-2,-1,0` before wrapping. Param and Length use separate
-mutation/loop banks with movement pickup at LOOP transitions. Loop Param resets
-to 1:1 on entry; loop Length recalls its prior span and initializes to eight.
-Chance is intentionally not banked or reinterpreted while the engine still
-records input triggers and replays mutation metadata.
+The tape stores four 32-bit channel words for each raw clock: one bit per
+sub-clock cell. Nine maximum-size stages (72 raw clocks, 1152 bytes) allow the
+current partial stage to coexist with eight complete stages. LOOP freezes the
+tape and directly replays the final post-mutation/choke states. Its window ends
+at the newest complete captured stage; Length selects the last L stages.
+
+Param and Length use separate mutation/loop banks with movement pickup at LOOP
+transitions. Loop Param resets to 1:1 on entry and maps smoothly from 1/8x to
+8x. The first loop Length comes from the physical slider; subsequent entries
+recall the prior loop span. Chance remains live only while the stock mutation
+engine is producing material for the tape.
+Length edits inside LOOP take effect at a stage boundary. When LOOP exits, the
+write head advances by the raw clocks elapsed during frozen playback and clears
+that span before recording resumes.
+
+Six contiguous calibrated Length regions edit N in the setup menu, mapping to
+`1, 2, 3, 4, 6, 8`. Superlooper stores the selection in EEPROM bytes 6
+and 7. Skip cannot manipulate the dedicated N transport; menu position 0 only
+enables captured-position jumps and exit catch-up.
 
 ## Verification Contract
 
@@ -105,8 +118,9 @@ The two runners have separate test contracts:
   mode scenarios against the simulator-only no-alternate oracle.
 - `make test-superlooper` compares an exact deterministic stock-runner
   fingerprint between the stock-only and Superlooper binaries, then runs the
-  alternate-specific battery with CYCLE up, including control pickup and loop
-  anchor/window regressions.
+  alternate-specific battery with CYCLE up, including control pickup,
+  anchor/window, N transport, rendered-tape, speed, and transport-isolation
+  regressions.
 - `make test-all` runs both contracts.
 
 The stock fingerprint is deliberately stricter than checking that scenarios

@@ -151,36 +151,53 @@ runner is already active.
 
 ### Shared external-sequencer contract
 
-CYCLE is never used directly by either sequencing engine. Setup-menu position 0
-enables or disables the legacy external-sequencer cycle/position maintenance in
-both classic and alternate runners. Catch-up pulses use the fast stock path by
-default; `fastExternalSequencerClock` is a rebuild-time source option for anyone
-who needs the slower path. The classic runner otherwise retains the stock clock
-ordering and timing algorithms.
+CYCLE is never used directly by either sequencing engine. In the classic
+runner, setup-menu position 0 enables or disables the legacy external-sequencer
+cycle/position maintenance. Superlooper always owns its N-divided CLOCK OUT;
+position 0 controls only its loop-position jumps and exit catch-up. Catch-up
+pulses use the fast stock path by default. The classic runner otherwise retains
+the stock clock ordering and timing algorithms.
 
 ### Superlooper build
 
-`make superlooper-build` supplies an independent looper while leaving the stock
-runner unchanged. Superlooper continuously records the same eight-step,
-four-ticks-per-step trigger and mutation history as v0.99, but LOOP playback is
-anchored to the newest captured beat. Length chooses the backward span: `1`
-repeats only the newest beat, `4` plays the last four beats oldest-to-newest,
-and `8` plays the complete history.
+`make superlooper-build` supplies an independent rendered-output looper while
+leaving the stock runner unchanged. Raw CLOCK IN still drives the v0.99
+mutation engine at its original rate. Superlooper taps the final four trigger
+states after mutation and choke resolution into a rolling tape with 32
+cells per raw clock. LOOP bypasses mutation rendering and plays that tape
+directly, so the loop repeats what the module actually emitted.
+
+One sequencer stage contains `N` raw clocks. Six contiguous regions of the
+calibrated Length slider select `N = 1, 2, 3, 4, 6, 8` while the setup menu is
+open; the selected ring LED is shown for one second and the value is saved in EEPROM.
+Outside LOOP, CLOCK OUT advances once per N raw clocks. Superlooper always keeps
+the preceding eight complete N-clock stages. Length chooses the backward span:
+`1` repeats only the newest complete stage, `4` plays the last four stages
+oldest-to-newest, and `8` plays the complete captured window.
 
 Param and Length have separate mutation and loop values. At each LOOP boundary
 the newly active values remain latched until that physical control moves beyond
 a small noise threshold. Entering LOOP always starts Param at exact 1:1 speed;
-Length recalls the preceding loop span (eight beats after a fresh CYCLE entry).
-Leaving LOOP restores the prior mutation Param and Length until they move.
+moving it gives a smooth quadratic range from 1/8x through 8x, with an
+exact-speed center region. On the first LOOP after selecting Superlooper,
+Length uses the current physical slider position. Later loop entries recall the
+preceding loop span until Length moves. Changes to a moved Length are applied at
+a loop-stage boundary. Leaving LOOP restores the prior mutation Param and
+Length until they move.
 
-Chance deliberately remains the live v0.99 probability control. Superlooper is
-still replaying captured input triggers and reapplying captured mutation
-metadata, so loop-density semantics are deferred until a post-mutation capture
-engine exists.
+Chance deliberately remains the live v0.99 probability control while recording.
+Its decisions are already present in the rendered tape, so Chance is not
+reapplied during playback. New loop-density semantics remain deferred.
+
+Skip cannot add or remove clocks from Superlooper's dedicated transport; it
+still follows the stock trigger-channel pass-through behavior. The other stock
+mutation modes run at the raw CLOCK IN rate before their rendered trigger output
+is captured.
 
 The Superlooper test battery covers fresh CYCLE transitions, control pickup,
-newest-beat anchoring, one-step 1:1 playback, external-clock settings, and all
-eight mutation modes.
+newest-stage anchoring, N division without mutation-timing changes, sub-clock
+capture, crossed-onset playback, smooth speed endpoints, tape-head resumption,
+Skip transport isolation, and all trigger-producing mutation modes.
 
 ## Boot Controls
 
