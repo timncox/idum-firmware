@@ -45,6 +45,16 @@ void outputGates();
 void writeModeMuxAddress(unsigned int muxAddress);
 void writeModeLed(unsigned int ledIndex);
 void displayFirmwareVersion(unsigned int firmwareNumber);
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
+void superlooperReadInputs();
+void superlooperArmControlPickup(bool enteringLoop);
+void superlooperDetermineLooperStatus();
+void superlooperCalculateLooperVariables();
+void saveLoopVariables();
+extern unsigned int superlooperPhysicalLength;
+extern unsigned int superlooperLoopLength;
+extern unsigned int superlooperAnchorHistoryIndex;
+#endif
 #ifdef IDUM_SIM_CONST_BREAK_TABLE
 extern const int breakBeat1[16][4][16];
 #else
@@ -72,9 +82,13 @@ extern unsigned int modeDialPosition;
 extern unsigned int modePosition;
 extern bool activeModes[8];
 extern bool clockEdge;
+extern bool clockIn;
 extern bool loopEnable;
 extern bool loopInputBehavior;
 extern bool loopIndexChanged;
+extern bool loopButtonActiveEdge;
+extern bool loopClockMult;
+extern bool loopClockMultOld;
 extern bool menuMode;
 extern bool modificationActive;
 extern bool splitMode;
@@ -106,6 +120,7 @@ extern bool trig4Choke;
 extern unsigned int intervalCount;
 extern unsigned int lengthScaled;
 extern unsigned int loopLength;
+extern unsigned int loopCycleIndex;
 extern unsigned int loopIndex;
 extern unsigned int originalHistoryIndex;
 extern unsigned int loopRandom;
@@ -124,6 +139,7 @@ extern unsigned int modifyLength2;
 extern unsigned int modifyLength3;
 extern unsigned int modifyLength4;
 extern unsigned int modifyParam;
+extern unsigned int paramRead;
 extern unsigned int modifyParam1;
 extern unsigned int modifyParam2;
 extern unsigned int modifyParam3;
@@ -136,6 +152,7 @@ extern unsigned int probabilityModifier;
 extern unsigned int ratchetAmount;
 extern unsigned int ratchetAmount1;
 extern unsigned int trig3Divide;
+extern unsigned int unscaledParam;
 extern unsigned int unscaledParam1;
 extern unsigned int unscaledParam2;
 extern unsigned int unscaledParam3;
@@ -679,6 +696,163 @@ int alternateClockTrackingContractRegressionScenario() {
       + " alternate=" + std::to_string(alternateTracksWhenEnabled)
       + "/" + std::to_string(alternateStopsWhenDisabled)
       + " fast=" + std::to_string(fixedFastClockPolicy)
+  );
+#endif
+}
+
+int superlooperControlPickupRegressionScenario() {
+#if IDUM_ALT_ENGINE != IDUM_ALT_ENGINE_SUPERLOOPER
+  return reportFirmwareRegression(
+    "superlooper-control-pickup",
+    false,
+    "Superlooper is not compiled"
+  );
+#else
+  resetSimulation();
+  setup();
+  resetSuperlooperEngine();
+
+  setLogicalAnalog(19, 200);
+  setLogicalAnalog(20, 321);
+  setLogicalAnalog(18, 300);
+  superlooperReadInputs();
+
+  const unsigned int mutationParamBeforeLoop = paramRead;
+  const unsigned int mutationLengthBeforeLoop = lengthScaled;
+
+  loopEnable = true;
+  superlooperArmControlPickup(true);
+  const bool predictableLoopDefaults = unscaledParam == 8
+                                    && lengthScaled == 8
+                                    && probRead == 321;
+
+  // Chance remains a live stock control in this trigger-recording looper.
+  setLogicalAnalog(20, 111);
+  superlooperReadInputs();
+  const bool chanceStayedLive = probRead == 111;
+  const bool loopControlsStayedLatched = unscaledParam == 8 && lengthScaled == 8;
+
+  setLogicalAnalog(19, 700);
+  setLogicalAnalog(18, 880);
+  superlooperReadInputs();
+  const bool loopControlsPickedUp = paramRead == 700
+                                 && lengthScaled == superlooperPhysicalLength
+                                 && lengthScaled != 8;
+
+  loopEnable = false;
+  superlooperArmControlPickup(false);
+  const bool mutationControlsRestored = paramRead == mutationParamBeforeLoop
+                                     && lengthScaled == mutationLengthBeforeLoop
+                                     && probRead == 111;
+
+  superlooperReadInputs();
+  const bool exitControlsStayedLatched = paramRead == mutationParamBeforeLoop
+                                      && lengthScaled == mutationLengthBeforeLoop;
+
+  setLogicalAnalog(19, 900);
+  setLogicalAnalog(18, 50);
+  superlooperReadInputs();
+  const bool mutationControlsPickedUp = paramRead == 900
+                                     && lengthScaled == superlooperPhysicalLength;
+
+  return reportFirmwareRegression(
+    "superlooper-control-pickup",
+    predictableLoopDefaults && chanceStayedLive && loopControlsStayedLatched
+      && loopControlsPickedUp && mutationControlsRestored
+      && exitControlsStayedLatched && mutationControlsPickedUp,
+    "loop-defaults=" + std::to_string(predictableLoopDefaults)
+      + ", chance-live=" + std::to_string(chanceStayedLive)
+      + ", loop-pickup=" + std::to_string(loopControlsPickedUp)
+      + ", mutation-restore/pickup=" + std::to_string(mutationControlsRestored)
+      + "/" + std::to_string(mutationControlsPickedUp)
+  );
+#endif
+}
+
+int superlooperAnchorRegressionScenario() {
+#if IDUM_ALT_ENGINE != IDUM_ALT_ENGINE_SUPERLOOPER
+  return reportFirmwareRegression(
+    "superlooper-most-recent-anchor",
+    false,
+    "Superlooper is not compiled"
+  );
+#else
+  resetSimulation();
+  setup();
+  resetSuperlooperEngine();
+
+  setLogicalAnalog(19, 400);
+  setLogicalAnalog(18, 300);
+  superlooperReadInputs();
+
+  superlooperLoopLength = 4;
+  historyIndex = 6;
+  loopEnable = false;
+  loopButtonActiveEdge = true;
+  menuMode = false;
+  clockIn = false;
+  clockEdge = false;
+  cycleIn = false;
+  superlooperDetermineLooperStatus();
+  loopButtonActiveEdge = false;
+
+  std::vector<unsigned int> readIndices;
+  auto captureStage = [&]() {
+    superlooperCalculateLooperVariables();
+    readIndices.push_back((loopIndex + originalHistoryIndex) % 8);
+    saveLoopVariables();
+  };
+  auto advanceStage = [&]() {
+    clockIn = false;
+    clockEdge = false;
+    superlooperCalculateLooperVariables();
+    saveLoopVariables();
+
+    clockIn = true;
+    clockEdge = true;
+    captureStage();
+    clockEdge = false;
+  };
+
+  captureStage();
+  advanceStage();
+  advanceStage();
+  advanceStage();
+  advanceStage();
+
+  const std::vector<unsigned int> expected {3, 4, 5, 6, 3};
+  const bool fourBeatWindow = readIndices == expected;
+  const bool newestBeatIsAnchor = originalHistoryIndex == 6
+                               && superlooperAnchorHistoryIndex == 6;
+
+  // Changing L moves only the beginning of the window; its endpoint remains
+  // the captured anchor.
+  lengthScaled = superlooperLoopLength = 2;
+  loopCycleIndex = 0;
+  clockIn = false;
+  clockEdge = false;
+  superlooperCalculateLooperVariables();
+  const unsigned int twoBeatStart = (loopIndex + originalHistoryIndex) % 8;
+
+  lengthScaled = superlooperLoopLength = 1;
+  loopCycleIndex = 0;
+  clockIn = true;
+  clockEdge = false;
+  loopClockMultOld = true;
+  superlooperCalculateLooperVariables();
+  const unsigned int oneBeatRead = (loopIndex + originalHistoryIndex) % 8;
+  const bool shorterWindowsStayAnchored = twoBeatStart == 5 && oneBeatRead == 6;
+  const bool oneBeatRunsAtOriginalSpeed = loopClockMult;
+
+  return reportFirmwareRegression(
+    "superlooper-most-recent-anchor",
+    fourBeatWindow && newestBeatIsAnchor && shorterWindowsStayAnchored
+      && oneBeatRunsAtOriginalSpeed,
+    "L4=3,4,5,6,3:" + std::to_string(fourBeatWindow)
+      + ", anchor=" + std::to_string(originalHistoryIndex)
+      + ", L2/L1=" + std::to_string(twoBeatStart)
+      + "/" + std::to_string(oneBeatRead)
+      + ", 1:1=" + std::to_string(oneBeatRunsAtOriginalSpeed)
   );
 #endif
 }
@@ -1663,6 +1837,8 @@ int allSuperlooperRegressionsScenario() {
   const std::vector<std::string> scenarios = {
     "regression-alternate-engine-boundary",
     "regression-alternate-clock-tracking-contract",
+    "regression-superlooper-control-pickup",
+    "regression-superlooper-anchor",
     "all-alternate-modes",
   };
 
@@ -1736,6 +1912,8 @@ int runScenario(const std::string& name) {
   if (name == "regression-back-to-back-mode") return backToBackModeRegressionScenario();
   if (name == "regression-alternate-engine-boundary") return alternateEngineBoundaryRegressionScenario();
   if (name == "regression-alternate-clock-tracking-contract") return alternateClockTrackingContractRegressionScenario();
+  if (name == "regression-superlooper-control-pickup") return superlooperControlPickupRegressionScenario();
+  if (name == "regression-superlooper-anchor") return superlooperAnchorRegressionScenario();
   if (name == "regression-removed-mode-boot") return removedModeBootRegressionScenario();
   if (name == "regression-split-loop-empty-step") return splitLoopEmptyStepRegressionScenario();
   if (name == "regression-loop-phase") return loopPhaseAlignmentRegressionScenario();

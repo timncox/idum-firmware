@@ -160,12 +160,27 @@ ordering and timing algorithms.
 
 ### Superlooper build
 
-`make superlooper-build` currently establishes the independent runner and fresh
-CYCLE boundary. Its new loop semantics will be implemented inside that runner;
-the stock runner will not be modified to accommodate them. Its present test
-battery checks fresh CYCLE transitions and runs all mutation modes through the
-alternate runner. Loop anchoring, control pickup, chance, and post-mutation
-capture tests will be added alongside those behaviors.
+`make superlooper-build` supplies an independent looper while leaving the stock
+runner unchanged. Superlooper continuously records the same eight-step,
+four-ticks-per-step trigger and mutation history as v0.99, but LOOP playback is
+anchored to the newest captured beat. Length chooses the backward span: `1`
+repeats only the newest beat, `4` plays the last four beats oldest-to-newest,
+and `8` plays the complete history.
+
+Param and Length have separate mutation and loop values. At each LOOP boundary
+the newly active values remain latched until that physical control moves beyond
+a small noise threshold. Entering LOOP always starts Param at exact 1:1 speed;
+Length recalls the preceding loop span (eight beats after a fresh CYCLE entry).
+Leaving LOOP restores the prior mutation Param and Length until they move.
+
+Chance deliberately remains the live v0.99 probability control. Superlooper is
+still replaying captured input triggers and reapplying captured mutation
+metadata, so loop-density semantics are deferred until a post-mutation capture
+engine exists.
+
+The Superlooper test battery covers fresh CYCLE transitions, control pickup,
+newest-beat anchoring, one-step 1:1 playback, external-clock settings, and all
+eight mutation modes.
 
 ## Boot Controls
 

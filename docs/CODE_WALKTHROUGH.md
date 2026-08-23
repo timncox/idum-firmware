@@ -208,6 +208,13 @@ option, `fastExternalSequencerClock`, and defaults to fast. CYCLE transition is
 intentionally a fresh boundary rather than a synchronized handoff; LOOP
 transitions inside the alternate runner carry the musical semantics.
 
+The selected Superlooper runner owns a separate looper coordinator rather than
+branching inside the stock looper. It anchors playback to the newest captured
+beat and interprets Length as the number of beats ending at that anchor. Param
+and Length use movement pickup when crossing LOOP boundaries, with loop speed
+starting at 1:1. Chance remains the stock live probability input because this
+version still records input triggers and replays stored mutation metadata.
+
 External cycle maintenance tries to keep an attached sequencer aligned when
 IDUM changes clock behavior. This code lives mostly in `a91_followUtils.ino`
 and `a01_timers.ino`.

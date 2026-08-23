@@ -84,6 +84,19 @@ Alternates may duplicate the state-machine functions they need, but share the
 hardware, display, persistence, utility, and mutation-mode primitives. A literal
 second copy of the entire firmware would not fit in ATmega4809 flash.
 
+Superlooper currently owns its input-control routing and looper coordination in
+`c10_SuperlooperEngine.ino`. It reuses the calibrated ADC scaling, history
+arrays, modification playback, output modes, and external-sequencer helpers,
+but does not add conditionals to the classic looper.
+
+Its loop window is expressed relative to the newest captured history cell:
+offset zero is the anchor and a length `L` begins at `1-L`. Thus `L=4` walks
+relative positions `-3,-2,-1,0` before wrapping. Param and Length use separate
+mutation/loop banks with movement pickup at LOOP transitions. Loop Param resets
+to 1:1 on entry; loop Length recalls its prior span and initializes to eight.
+Chance is intentionally not banked or reinterpreted while the engine still
+records input triggers and replays mutation metadata.
+
 ## Verification Contract
 
 The two runners have separate test contracts:
@@ -92,7 +105,8 @@ The two runners have separate test contracts:
   mode scenarios against the simulator-only no-alternate oracle.
 - `make test-superlooper` compares an exact deterministic stock-runner
   fingerprint between the stock-only and Superlooper binaries, then runs the
-  alternate-specific battery with CYCLE up.
+  alternate-specific battery with CYCLE up, including control pickup and loop
+  anchor/window regressions.
 - `make test-all` runs both contracts.
 
 The stock fingerprint is deliberately stricter than checking that scenarios
