@@ -44,7 +44,7 @@ void rotate();
 void outputGates();
 void writeModeMuxAddress(unsigned int muxAddress);
 void writeModeLed(unsigned int ledIndex);
-void displayFirmwareVersion(unsigned int firmwareNumber);
+void displayFirmwareBootSignature();
 #if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
 void superlooperReadInputs();
 void superlooperArmControlPickup(bool enteringLoop);
@@ -2201,7 +2201,7 @@ void interrupts() {
 }
 
 void assignPins();
-void displayFirmwareVersion(unsigned int firmwareNumber);
+void displayFirmwareBootSignature();
 void initializeEEPROM();
 void initializeHardwareInterrupts();
 bool slowClockTimer(void *);
@@ -2367,7 +2367,9 @@ void scatter();
 #include "b70_breakMode.ino"
 #include "b80_skipMode.ino"
 #include "c00_AlternateEngine.ino"
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
 #include "c10_SuperlooperEngine.ino"
+#endif
 #ifdef IDUM_SIM_ID00M
 #include "b81_contaminationMode.ino"
 #include "b82_scatterMode.ino"

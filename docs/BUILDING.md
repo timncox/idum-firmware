@@ -34,6 +34,27 @@ This installs the Arduino megaAVR core used by the default board target. Arduino
 make build
 ```
 
+The build first composes a generated Arduino sketch at
+`build/staged/superlooper/idum/`: it copies the stock/shared tabs from
+`firmware/idum/`, then overlays the selected source from
+`firmware/engines/superlooper/`. This staging step preserves Arduino's required
+single-sketch layout while keeping alternate engines separate in the source
+tree.
+
+The Arduino compiler's intermediate remains under `build/idum-superlooper/`.
+The flashable release file is copied to
+`build/release/alt-dum-superlooper-v1.0.0.hex`. Override the release version for
+a development build without renaming the sketch:
+
+```sh
+make build FIRMWARE_VERSION=1.0.1-dev
+```
+
+That example produces `build/release/alt-dum-superlooper-v1.0.1-dev.hex`; the
+default remains `build/release/alt-dum-superlooper-v1.0.0.hex`. The basename
+includes the selected engine so later Alt-DUM engine builds remain
+distinguishable.
+
 Default target:
 
 ```sh

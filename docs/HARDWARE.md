@@ -54,6 +54,15 @@ hardware choice independently in EEPROM byte 5:
 The default for a new or newly formatted EEPROM is the v1.3+ order. The EEPROM
 format marker is `R`; upgrading from an older format resets bytes 1–4 once.
 
+## Firmware Boot Signature
+
+Alt-DUM v1.0.0 identifies itself after any boot-control confirmation animation
+with four 250 ms paired frames: the two outer mode LEDs, then each successive
+inner pair through the center two LEDs. It finishes by holding the single
+far-left LED for 250 ms. Stock v0.99 instead shows one orange mode LED. The
+apparent pairs are multiplexed; the hardware selects only one mode LED at a
+time, and firmware alternates the two addresses rapidly.
+
 ## Firmware Size Baseline
 
 With `arduino:megaavr:nona4809:mode=off`, imported v0.99 builds at:

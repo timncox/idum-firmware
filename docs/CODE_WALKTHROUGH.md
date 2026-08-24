@@ -24,7 +24,8 @@ The main loop order is:
 `setup()` in `a10_Setup.ino` performs hardware and saved-state initialization:
 
 - `assignPins()` configures all pins as inputs/outputs.
-- `displayFirmwareVersion(2)` flashes the version code on the mode LEDs.
+- `displayFirmwareBootSignature()` identifies Alt-DUM with two apparently
+  simultaneous mode LEDs converging from the outside, then landing far left.
 - `Serial.begin(9600)` is only called if `printEnable` is set.
 - `initializeEEPROM()` reads options and active modes if EEPROM byte `0` contains `Q`; otherwise it writes defaults.
 - `initializeIntervals()` resets mode-boundary interval state.

@@ -48,9 +48,7 @@ void setup() {
 
   startupAnimation();
 
-  displayFirmwareVersion(7);  //This displays on the mode ring which firmware is loaded on your IDUM.  Increase the number for each update.
-
-  delay(1000);  //Delay the start of the program so that we can display the firmware number for a little bit longer.
+  displayFirmwareBootSignature();
 
   dTimer.every(1, displayTimer);  //Start up the display counter, runs every '1' microsecond.
 }
@@ -150,9 +148,27 @@ void writeModeLed(unsigned int ledIndex) {
   writeModeMuxAddress(LEDTweak ? modeLedAddressMap[ledIndex] : ledIndex);
 }
 
-void displayFirmwareVersion(unsigned int firmwareNumber) {
-  if (firmwareNumber == 0) writeModeLed(0);
-  else writeModeLed(firmwareNumber - 1);
+//Show this firmware's identity as two apparently simultaneous LEDs moving from
+//the ends of the mode row toward its center, then landing on the far-left LED.
+//The ring is driven by a mux, so the two LEDs in each frame are actually
+//interleaved quickly enough to appear lit together.
+void displayFirmwareBootSignature() {
+  const uint8_t leftLed[4] = { 0, 1, 2, 3 };
+  const uint8_t rightLed[4] = { 7, 6, 5, 4 };
+  const unsigned long frameDurationMs = 250;
+
+  for (uint8_t frame = 0; frame < 4; ++frame) {
+    const unsigned long frameStart = millis();
+    while (millis() - frameStart < frameDurationMs) {
+      writeModeLed(leftLed[frame]);
+      delay(2);
+      writeModeLed(rightLed[frame]);
+      delay(2);
+    }
+  }
+
+  writeModeLed(0);
+  delay(250);
 }
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\

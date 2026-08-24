@@ -1,15 +1,29 @@
-# Mystic Circuits IDUM Firmware
+# Alt-DUM Firmware
 
-This is a clean local repo for the Mystic Circuits IDUM Eurorack module firmware, starting from the official v.99 Arduino sketch.
+**Alt-DUM is independent alternate firmware for the Mystic Circuits IDUM
+Eurorack module. It is not the official Mystic Circuits firmware.**
 
-The goal is to make the firmware hackable without requiring the Arduino GUI editor. The source still builds as an Arduino sketch for now, but the repo has a normal layout, repeatable CLI commands, and a place to document the system as we overhaul it.
+Alt-DUM keeps a stock-derived classic runner and pairs it with one independently
+selectable alternate engine. The physical CYCLE switch chooses between them at
+runtime. Alt-DUM v1.0.0 ships with Superlooper as that alternate engine and is
+built from the official IDUM v0.99 Arduino source.
+
+The repository makes the firmware hackable without the Arduino GUI: it provides
+separated engine source, repeatable command-line builds, a host simulator, and
+regression tests.
 
 ## Layout
 
-- `firmware/idum/` - imported v.99 firmware source, with the main sketch normalized to `idum.ino`
+- `firmware/idum/` - stock-derived/shared IDUM sketch and hardware layer
+- `firmware/engines/superlooper/` - Superlooper's independent engine source
 - `sim/` - host-side simulator for exercising firmware behavior without flashing the module
 - `scripts/` - convenience wrappers for command-line setup, build, and upload
 - `docs/` - architecture notes and build/install details
+
+Arduino requires every `.ino` tab in one sketch directory. The source tree does
+not mix engines to satisfy that constraint: builds generate an ignored staged
+sketch under `build/staged/<engine>/idum/` by copying the stock/shared tabs and
+then only the selected engine. Generated staging files are never edited by hand.
 
 ## Quick Start
 
@@ -39,12 +53,40 @@ Override the board target like this:
 make build FQBN=arduino:avr:nano
 ```
 
-`make build` produces the production selector firmware with Superlooper as its
-compile-time-selected alternate. The explicit equivalent is:
+`make build` performs the complete v1.0.0 production build:
+
+1. Copy the stock-derived/shared sketch into
+   `build/staged/superlooper/idum/`.
+2. Add only the selected source from `firmware/engines/superlooper/`.
+3. Compile the staged sketch for the Arduino Nano Every / ATmega4809.
+4. Export `build/release/alt-dum-superlooper-v1.0.0.hex`.
+
+The explicit Superlooper target is:
 
 ```sh
 make superlooper-build
 ```
+
+The release basename identifies both the Alt-DUM family and its included engine.
+To produce a differently versioned development build without renaming the
+Arduino sketch:
+
+```sh
+make build FIRMWARE_VERSION=1.0.1-dev
+```
+
+The shell wrapper accepts the same setting:
+
+```sh
+FIRMWARE_VERSION=1.0.1-dev scripts/build.sh
+```
+
+Those examples produce `build/release/alt-dum-superlooper-v1.0.1-dev.hex`;
+without an override, the default is
+`build/release/alt-dum-superlooper-v1.0.0.hex`. A future engine build can
+override `FIRMWARE_BASENAME` with its corresponding `alt-dum-<engine>` name.
+The boot animation identifies the Alt-DUM firmware family; the release filename
+is the authoritative exact version.
 
 Every production build chooses one alternate engine; the finished firmware's
 CYCLE switch always selects between the classic runner (down) and that alternate
@@ -131,12 +173,13 @@ At a high level:
 
 ## Alternate Engine Framework
 
-The stock mode, looper, mutation, and output functions remain free of alternate
-engine conditionals. The production dispatcher uses a small copied top-level
-classic pipeline so it can adapt the repurposed CYCLE control before calling
-those functions. A selected alternate gets its own top-level runner and may copy
-and change more of the state machine as needed while sharing hardware I/O,
-display, EEPROM, utilities, and mutation renderers.
+The stock-derived mode, looper, mutation, and output functions remain free of
+alternate-engine conditionals. The production dispatcher uses a small copied
+top-level classic pipeline so it can adapt the repurposed CYCLE control before
+calling those functions. A selected alternate lives under
+`firmware/engines/<engine>/`, gets its own top-level runner, and may copy and
+change more of the state machine as needed while sharing hardware I/O, display,
+EEPROM, utilities, and mutation renderers.
 
 The interface is intentionally tiny:
 
@@ -200,6 +243,23 @@ capture, crossed-onset playback, smooth speed endpoints, tape-head resumption,
 Skip transport isolation, and all trigger-producing mutation modes.
 
 ## Boot Controls
+
+### Identifying Alt-DUM
+
+After any boot-control confirmation, Alt-DUM v1.0.0 shows this mode-LED
+signature:
+
+1. The two outer LEDs appear together for 250 ms.
+2. The pair steps inward three times, ending on the two center LEDs.
+3. The animation lands on the single far-left LED for 250 ms.
+
+The full signature lasts about 1.25 seconds. Stock IDUM v0.99 instead holds a
+single orange mode LED, so the two firmware families are visually distinct at
+power-on.
+
+The mode LEDs share a three-bit hardware multiplexer, so only one ring LED is
+electrically selected at any instant. Firmware rapidly alternates between the
+two LEDs in each frame, making the pair appear continuously lit.
 
 Two power-on gestures keep user settings and the physical mode-ring wiring
 separate:

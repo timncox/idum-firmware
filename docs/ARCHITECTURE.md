@@ -15,7 +15,7 @@ The firmware is a multi-tab Arduino sketch. Arduino concatenates the `.ino` file
 `setup()` lives in `a10_Setup.ino` and:
 
 - configures all digital/analog pins
-- flashes the firmware version on the mode LEDs
+- shows Alt-DUM's converging paired-LED signature and far-left landing
 - initializes EEPROM defaults or reads saved options
 - initializes timing boundary state
 - attaches rising-edge interrupts for trigger inputs 1-4
@@ -66,7 +66,8 @@ runs:
 - `b70_breakMode.ino` - break mode.
 - `b80_skipMode.ino` - skip mode.
 - `c00_AlternateEngine.ino` - compile-time selection of one alternate runner.
-- `c10_SuperlooperEngine.ino` - independent Superlooper runner and reset boundary.
+- `firmware/engines/superlooper/c10_SuperlooperEngine.ino` - independent
+  Superlooper runner and reset boundary, overlaid only in Superlooper builds.
 - `engine_config.h` - alternate engine IDs and the production alternate default.
 - `x_utils.ino` - EEPROM packing/unpacking helpers.
 
@@ -85,7 +86,8 @@ hardware, display, persistence, utility, and mutation-mode primitives. A literal
 second copy of the entire firmware would not fit in ATmega4809 flash.
 
 Superlooper owns its input-control routing, N-divided sequencer transport,
-rendered tape, and looper coordination in `c10_SuperlooperEngine.ino`. It reuses
+rendered tape, and looper coordination in
+`firmware/engines/superlooper/c10_SuperlooperEngine.ino`. It reuses
 calibrated ADC scaling and the stock mutation renderers, but does not add
 conditionals to the classic looper. Raw CLOCK IN remains the mutation clock.
 Only CLOCK OUT and the duration of a captured loop stage use N.

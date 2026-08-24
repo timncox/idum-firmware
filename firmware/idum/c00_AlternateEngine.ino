@@ -3,7 +3,8 @@
 //
 // To add an alternate engine:
 //   1. assign it an ID in engine_config.h;
-//   2. implement run<Name>Engine() and reset<Name>Engine() in its own file;
+//   2. add firmware/engines/<name>/ with run<Name>Engine() and
+//      reset<Name>Engine();
 //   3. add one branch here; and
 //   4. add a Makefile name-to-ID mapping.
 // Only the selected alternate is retained by the linker.

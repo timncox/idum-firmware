@@ -37,6 +37,7 @@ if ! make -C "$repo_dir" sim SIM_BUILD=build/sim/idum-current >"$stage_dir/curre
 fi
 
 if ! make -C "$repo_dir" sim \
+  ALT_ENGINE=none \
   SIM_BUILD=build/sim/idum-stock \
   SIM_FIRMWARE="$stage_dir/stock" \
   SIM_MAIN=IDUM_Firmware_v_99.ino \
@@ -46,6 +47,7 @@ if ! make -C "$repo_dir" sim \
 fi
 
 if ! make -C "$repo_dir" sim \
+  ALT_ENGINE=none \
   SIM_BUILD=build/sim/id00m \
   SIM_FIRMWARE="$stage_dir/id00m" \
   SIM_MAIN=IDUM_Custom.ino \

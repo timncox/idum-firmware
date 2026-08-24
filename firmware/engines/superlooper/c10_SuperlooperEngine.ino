@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\
-// Superlooper: an alternate rendered-output tape engine.
+// Superlooper: an independently selectable rendered-output tape engine.
 //
 // Raw CLOCK IN continues to drive the stock mutation state machine. N only
 // defines external-sequencer clock division and the number of raw clocks in a

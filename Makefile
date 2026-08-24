@@ -1,7 +1,6 @@
 ARDUINO_CLI ?= arduino-cli
 ARDUINO_CONFIG ?= arduino-cli.yaml
 FQBN ?= arduino:megaavr:nona4809:mode=off
-SKETCH ?= firmware/idum
 ALT_ENGINE ?= superlooper
 ifeq ($(ALT_ENGINE),none)
 ALT_ENGINE_ID := 0
@@ -12,10 +11,20 @@ $(error Unknown ALT_ENGINE '$(ALT_ENGINE)'; expected none or superlooper)
 endif
 ENGINE_DEFINE := -DIDUM_ALT_ENGINE=$(ALT_ENGINE_ID)
 FIRMWARE_DEFINES ?=
+STOCK_SKETCH ?= firmware/idum
+ENGINE_ROOT ?= firmware/engines
+ENGINE_SOURCE := $(ENGINE_ROOT)/$(ALT_ENGINE)
+STAGED_SKETCH ?= build/staged/$(ALT_ENGINE)/idum
+SKETCH := $(STAGED_SKETCH)
 BUILD_PATH ?= build/idum-$(ALT_ENGINE)
+FIRMWARE_BASENAME ?= alt-dum-$(ALT_ENGINE)
+FIRMWARE_VERSION ?= 1.0.0
+RELEASE_DIR ?= build/release
+SKETCH_BASENAME := $(notdir $(SKETCH))
+RELEASE_ARTIFACT := $(RELEASE_DIR)/$(FIRMWARE_BASENAME)-v$(FIRMWARE_VERSION).hex
 PORT ?=
 SIM_CXX ?= c++
-SIM_FIRMWARE ?= firmware/idum
+SIM_FIRMWARE ?= $(STOCK_SKETCH)
 SIM_MAIN ?= idum.ino
 SIM_SDKROOT := $(shell xcrun --show-sdk-path 2>/dev/null)
 SIM_LIBCXX := $(SIM_SDKROOT)/usr/include/c++/v1
@@ -23,15 +32,16 @@ SIM_PLATFORM_FLAGS := $(if $(wildcard $(SIM_LIBCXX)/cstdint),-isystem $(SIM_LIBC
 SIM_CXXFLAGS ?= -std=c++17 -Wall -Wextra -Wno-unused-parameter -Wno-comment -Wno-sign-compare
 SIM_DEFINES ?= -DIDUM_SIM_HAS_ADC_DIAGNOSTIC=1 -DIDUM_SIM_HAS_RNG_SEEDING=1 -DIDUM_SIM_HAS_ATOMIC_LOOP_RECORD=1 -DIDUM_SIM_HAS_BOOT_RESET=1 -DIDUM_SIM_CONST_BREAK_TABLE=1
 SIM_BUILD := build/sim/idum-sim-$(ALT_ENGINE)
+SIM_INCLUDE_FLAGS := -Isim -I$(SIM_FIRMWARE) -I$(ENGINE_SOURCE)
 
-.PHONY: help doctor setup require-alternate-engine build superlooper-build upload safe-io-build safe-io-upload adc-diagnostic-build adc-diagnostic-upload clean board-list sim sim-compile sim-modes sim-alternate-modes sim-regressions sim-stock-parity test-stock-reference test-superlooper test-all sim-clock-stop sim-break-patterns sim-break-playback sim-id00m-regressions sim-clean
+.PHONY: help doctor setup stage-sketch require-alternate-engine build superlooper-build upload safe-io-build safe-io-upload adc-diagnostic-build adc-diagnostic-upload clean board-list sim sim-compile sim-modes sim-alternate-modes sim-regressions sim-stock-parity test-stock-reference test-superlooper test-all sim-clock-stop sim-break-patterns sim-break-playback sim-id00m-regressions sim-clean
 
 help:
-	@echo "IDUM firmware build targets"
+	@echo "Alt-DUM firmware build targets"
 	@echo
 	@echo "  make setup                Install/update the Arduino megaAVR core"
 	@echo "  make doctor               Check local command-line toolchain"
-	@echo "  make build                Compile firmware/idum for $(FQBN)"
+	@echo "  make build                Stage stock/shared source plus the selected engine and compile"
 	@echo "  make superlooper-build    Compile production firmware (CYCLE selects Superlooper)"
 	@echo "  make safe-io-build        Compile firmware using normal Arduino pin I/O"
 	@echo "  make safe-io-upload PORT=<port> Upload normal Arduino pin I/O firmware"
@@ -57,7 +67,12 @@ help:
 	@echo "  ARDUINO_CONFIG=$(ARDUINO_CONFIG)"
 	@echo "  FQBN=$(FQBN)"
 	@echo "  SKETCH=$(SKETCH)"
+	@echo "  STOCK_SKETCH=$(STOCK_SKETCH)"
+	@echo "  ENGINE_SOURCE=$(ENGINE_SOURCE)"
 	@echo "  BUILD_PATH=$(BUILD_PATH)"
+	@echo "  FIRMWARE_BASENAME=$(FIRMWARE_BASENAME)"
+	@echo "  FIRMWARE_VERSION=$(FIRMWARE_VERSION)"
+	@echo "  RELEASE_DIR=$(RELEASE_DIR)"
 	@echo "  ALT_ENGINE=$(ALT_ENGINE)"
 	@echo "  FIRMWARE_DEFINES=$(FIRMWARE_DEFINES)"
 
@@ -68,30 +83,36 @@ setup:
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) core update-index
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) core install arduino:megaavr
 
+stage-sketch:
+	ALT_ENGINE="$(ALT_ENGINE)" STOCK_SKETCH="$(STOCK_SKETCH)" ENGINE_SOURCE="$(ENGINE_SOURCE)" STAGED_SKETCH="$(STAGED_SKETCH)" scripts/stage-sketch.sh
+
 require-alternate-engine:
 	@if [ "$(ALT_ENGINE)" = "none" ]; then echo "ALT_ENGINE=none is simulator/reference-only; production firmware always assigns CYCLE to an alternate engine"; exit 2; fi
 
-build: require-alternate-engine
+build: require-alternate-engine stage-sketch
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) compile --fqbn $(FQBN) --build-path $(BUILD_PATH) --build-property compiler.cpp.extra_flags="$(ENGINE_DEFINE) $(FIRMWARE_DEFINES)" $(SKETCH)
+	mkdir -p "$(RELEASE_DIR)"
+	cp "$(BUILD_PATH)/$(SKETCH_BASENAME).ino.hex" "$(RELEASE_ARTIFACT)"
+	@echo "Release firmware: $(RELEASE_ARTIFACT)"
 
 superlooper-build:
 	$(MAKE) build ALT_ENGINE=superlooper
 
-upload:
+upload: stage-sketch
 	@if [ -z "$(PORT)" ]; then echo "Set PORT, for example: make upload PORT=/dev/cu.usbmodem101"; exit 2; fi
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) upload -p $(PORT) --fqbn $(FQBN) --input-dir $(BUILD_PATH) $(SKETCH)
 
-safe-io-build: require-alternate-engine
+safe-io-build: require-alternate-engine stage-sketch
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) compile --fqbn $(FQBN) --build-path $(BUILD_PATH)-safe-io --build-property compiler.cpp.extra_flags="$(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_DISABLE_FAST_IO=1" $(SKETCH)
 
-safe-io-upload:
+safe-io-upload: stage-sketch
 	@if [ -z "$(PORT)" ]; then echo "Set PORT, for example: make safe-io-upload PORT=/dev/cu.usbmodem101"; exit 2; fi
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) upload -p $(PORT) --fqbn $(FQBN) --input-dir $(BUILD_PATH)-safe-io $(SKETCH)
 
-adc-diagnostic-build: require-alternate-engine
+adc-diagnostic-build: require-alternate-engine stage-sketch
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) compile --fqbn $(FQBN) --build-path $(BUILD_PATH)-adc --build-property compiler.cpp.extra_flags="$(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_ADC_DIAGNOSTIC=1" $(SKETCH)
 
-adc-diagnostic-upload:
+adc-diagnostic-upload: stage-sketch
 	@if [ -z "$(PORT)" ]; then echo "Set PORT, for example: make adc-diagnostic-upload PORT=/dev/cu.usbmodem101"; exit 2; fi
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) upload -p $(PORT) --fqbn $(FQBN) --input-dir $(BUILD_PATH)-adc $(SKETCH)
 
@@ -100,16 +121,16 @@ board-list:
 
 sim:
 	mkdir -p build/sim
-	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' -Isim -I$(SIM_FIRMWARE) sim/idum_sim.cpp -o $(SIM_BUILD)
+	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' $(SIM_INCLUDE_FLAGS) sim/idum_sim.cpp -o $(SIM_BUILD)
 	$(SIM_BUILD) smoke
 
 sim-compile:
 	mkdir -p build/sim
-	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' -Isim -I$(SIM_FIRMWARE) sim/idum_sim.cpp -o $(SIM_BUILD)
+	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' $(SIM_INCLUDE_FLAGS) sim/idum_sim.cpp -o $(SIM_BUILD)
 
 sim-modes:
 	mkdir -p build/sim
-	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' -Isim -I$(SIM_FIRMWARE) sim/idum_sim.cpp -o $(SIM_BUILD)
+	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' $(SIM_INCLUDE_FLAGS) sim/idum_sim.cpp -o $(SIM_BUILD)
 	$(SIM_BUILD) all-modes
 
 sim-alternate-modes:
@@ -118,7 +139,7 @@ sim-alternate-modes:
 .PHONY: sim-alternate-modes-run
 sim-alternate-modes-run:
 	mkdir -p build/sim
-	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' -Isim -I$(SIM_FIRMWARE) sim/idum_sim.cpp -o $(SIM_BUILD)
+	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' $(SIM_INCLUDE_FLAGS) sim/idum_sim.cpp -o $(SIM_BUILD)
 	$(SIM_BUILD) all-alternate-modes
 
 sim-stock-parity:
@@ -141,22 +162,22 @@ test-all:
 
 sim-regressions:
 	mkdir -p build/sim
-	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' -Isim -I$(SIM_FIRMWARE) sim/idum_sim.cpp -o $(SIM_BUILD)
+	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' $(SIM_INCLUDE_FLAGS) sim/idum_sim.cpp -o $(SIM_BUILD)
 	$(SIM_BUILD) all-regressions
 
 sim-clock-stop:
 	mkdir -p build/sim
-	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' -Isim -I$(SIM_FIRMWARE) sim/idum_sim.cpp -o $(SIM_BUILD)
+	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' $(SIM_INCLUDE_FLAGS) sim/idum_sim.cpp -o $(SIM_BUILD)
 	$(SIM_BUILD) clock-stop-burst
 
 sim-break-patterns:
 	mkdir -p build/sim
-	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' -Isim -I$(SIM_FIRMWARE) sim/idum_sim.cpp -o $(SIM_BUILD)
+	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' $(SIM_INCLUDE_FLAGS) sim/idum_sim.cpp -o $(SIM_BUILD)
 	$(SIM_BUILD) break-patterns
 
 sim-break-playback:
 	mkdir -p build/sim
-	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' -Isim -I$(SIM_FIRMWARE) sim/idum_sim.cpp -o $(SIM_BUILD)
+	$(SIM_CXX) $(SIM_CXXFLAGS) $(SIM_PLATFORM_FLAGS) $(SIM_DEFINES) $(ENGINE_DEFINE) $(FIRMWARE_DEFINES) -DIDUM_SIM_MAIN='"$(SIM_MAIN)"' $(SIM_INCLUDE_FLAGS) sim/idum_sim.cpp -o $(SIM_BUILD)
 	$(SIM_BUILD) break-playback
 
 sim-id00m-regressions:
