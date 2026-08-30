@@ -98,6 +98,7 @@ unsigned long generatedTriggerPulseWidth = 10000;    //default = 10ms for burst/
 unsigned long generatedClockPulseWidth = 10000;      //default = 10ms for one-shot clock outputs at modification start
 unsigned long breakTriggerPulseWidth = 5000;         //default = 5ms for Break mode trigger cells
 unsigned long loopClockPulseWidth = 5000;            //default = 5ms for loop/external sequencer clocking
+unsigned long externalSequencerBurstHalfPeriod = 500; //default = fixed 500us high/low burst cadence, independent of N and loop speed
 unsigned int clockMultiplyWindow = 1000;             //default = 1ms window for x2/x4 clock tick detection
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\

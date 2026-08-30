@@ -53,10 +53,14 @@ void superlooperSetNOption(uint8_t option);
 void superlooperResetSequencerTiming();
 void superlooperClearTape();
 void superlooperAdvanceSequencerTiming();
+void superlooperAdvanceLogicalTransport(unsigned int logicalClockCount);
+void superlooperPlayTransportCell(uint16_t phraseCell);
+uint8_t superlooperTransportAdvanceAt(uint16_t rawClockIndex, uint8_t tick);
 void superlooperRecordRenderedOutputs(uint8_t stateMask);
 void superlooperCaptureCompleteWindow();
 void superlooperConfigureLoopLength(unsigned int requestedLength);
 void superlooperInitializeLoopTransport();
+void superlooperAdvanceLoopTransport(unsigned long currentMicros);
 uint8_t superlooperUpdateLoopPlayback();
 void superlooperResumeTapeAfterLoop();
 uint8_t superlooperRenderedLoopCellState(uint16_t phraseCell);
@@ -74,11 +78,21 @@ extern uint16_t superlooperTapeWriteIndex;
 extern uint16_t superlooperCaptureStartIndex;
 extern uint16_t superlooperLoopBaseCell;
 extern uint16_t superlooperLoopBaseCellCount;
+extern uint8_t superlooperLoopBaseStartStage;
 extern unsigned long superlooperLoopTransportLastTime;
+extern uint32_t superlooperLoopTransportAccumulator;
+extern unsigned int superlooperLoopSpeedControl;
 extern uint32_t superlooperLoopRawClocksElapsed;
 extern uint8_t superlooperLoopTransportStage;
 extern uint8_t superlooperLoopNaturalStage;
 extern uint32_t superlooperRenderedTape[72][4];
+extern uint8_t superlooperTransportTape[72][16];
+extern uint8_t superlooperTransportStageAtStart[72];
+extern uint8_t superlooperTrackedSequencerStage;
+extern uint16_t superlooperQueuedSequencerClocks;
+extern bool superlooperQueuedClockPulseHigh;
+extern bool superlooperQueuedClockGapStarted;
+extern unsigned long superlooperQueuedClockTransitionTime;
 #endif
 #ifdef IDUM_SIM_CONST_BREAK_TABLE
 extern const int breakBeat1[16][4][16];
@@ -87,6 +101,8 @@ extern int breakBeat1[16][4][16];
 #endif
 extern bool externalSequencerTracking;
 extern const bool fastExternalSequencerClock;
+extern unsigned long loopClockPulseWidth;
+extern unsigned long externalSequencerBurstHalfPeriod;
 #ifdef IDUM_SIM_HAS_LEGACY_LOOP_MODULATION
 extern unsigned int mutationLengthScaled;
 extern bool loopParamPickupActive;
@@ -696,14 +712,14 @@ int alternateClockTrackingContractRegressionScenario() {
   const bool classicStopsWhenDisabled = !alternateEngineActive
                                      && !cycleSwitchIn && !cycleIn;
 
-  // CYCLE up changes runners only. Superlooper owns a dedicated N-divided
-  // transport, so stock cycle-maintenance writes are disabled there.
+  // CYCLE up changes runners only. Superlooper exposes the saved tracking
+  // option to mutation maintenance, then translates its logical advances by N.
   externalSequencerTracking = true;
   setLogicalGate(17, true);
   loop();
   loop();
   const bool alternateOwnsTransportWhenTrackingEnabled = alternateEngineActive
-                                                      && cycleSwitchIn && !cycleIn;
+                                                      && cycleSwitchIn && cycleIn;
 
   externalSequencerTracking = false;
   loop();
@@ -720,7 +736,7 @@ int alternateClockTrackingContractRegressionScenario() {
       && fixedFastClockPolicy,
     "classic=" + std::to_string(classicTracksWhenEnabled)
       + "/" + std::to_string(classicStopsWhenDisabled)
-      + " alternate-dedicated=" + std::to_string(alternateOwnsTransportWhenTrackingEnabled)
+      + " alternate-adapter=" + std::to_string(alternateOwnsTransportWhenTrackingEnabled)
       + "/" + std::to_string(alternateOwnsTransportWhenTrackingDisabled)
       + " fast=" + std::to_string(fixedFastClockPolicy)
   );
@@ -766,6 +782,7 @@ int superlooperControlPickupRegressionScenario() {
   const bool loopControlsPickedUp = paramRead == 700
                                  && lengthScaled == lengthPosition + 1
                                  && lengthScaled != firstPanelLoopLength;
+  const unsigned int savedLoopSpeed = paramRead;
 
   loopEnable = false;
   superlooperArmControlPickup(false);
@@ -783,16 +800,22 @@ int superlooperControlPickupRegressionScenario() {
   const bool mutationControlsPickedUp = paramRead == 900
                                      && lengthScaled == superlooperPhysicalLength;
 
+  loopEnable = true;
+  superlooperArmControlPickup(true);
+  const bool loopSpeedRetained = paramRead == savedLoopSpeed;
+
   return reportFirmwareRegression(
     "superlooper-control-pickup",
     predictableLoopDefaults && chanceStayedLive && loopControlsStayedLatched
       && loopControlsPickedUp && mutationControlsRestored
-      && exitControlsStayedLatched && mutationControlsPickedUp,
+      && exitControlsStayedLatched && mutationControlsPickedUp
+      && loopSpeedRetained,
     "loop-defaults=" + std::to_string(predictableLoopDefaults)
       + ", chance-live=" + std::to_string(chanceStayedLive)
       + ", loop-pickup=" + std::to_string(loopControlsPickedUp)
       + ", mutation-restore/pickup=" + std::to_string(mutationControlsRestored)
       + "/" + std::to_string(mutationControlsPickedUp)
+      + ", loop-speed-retained=" + std::to_string(loopSpeedRetained)
   );
 #endif
 }
@@ -887,39 +910,117 @@ int superlooperNTransportRegressionScenario() {
                                     && lengthScaled == 5
                                     && superlooperClocksPerStep == 8;
 
-  //With natural stage 2 and L=4, the captured window starts at stage 6.
-  //Entering between boundaries advances an attached eight-step sequencer four
-  //places; entering on a boundary advances five because that live edge has not
-  //yet been emitted by the alternate runner.
+  //Mutation advances are expressed in raw-clock units and translated through
+  //N before they are emitted and recorded. Seven logical clocks at N=3 become
+  //three physical sequencer advances (the first clock is emitted immediately).
+  superlooperSetNOption(2);
   externalSequencerTracking = true;
-  superlooperLoopLength = 4;
-  superlooperLoopNaturalStage = 2;
-  superlooperSequencerClockPhase = 1;
-  superlooperSequencerStepBoundary = false;
-  clockIn = false;
-  loopEnable = true;
+  loopEnable = false;
   writes.clear();
-  superlooperInitializeLoopTransport();
-  const bool midStageEntryAligned = countOutputOnsets(13) == 4
-                                 && superlooperLoopTransportStage == 6;
+  superlooperAdvanceLogicalTransport(7);
+  unsigned int recordedMutationJump = 0;
+  for (uint8_t tick = 0; tick < 32; ++tick) {
+    recordedMutationJump += superlooperTransportAdvanceAt(0, tick);
+  }
+  const bool mutationJumpDivided = countOutputOnsets(13) == 3
+                                && recordedMutationJump == 3
+                                && superlooperTrackedSequencerStage == 2;
 
-  superlooperLoopNaturalStage = 2;
-  superlooperSequencerClockPhase = 0;
-  superlooperSequencerStepBoundary = true;
-  clockIn = true;
-  writes.clear();
-  superlooperInitializeLoopTransport();
-  const bool boundaryEntryAligned = countOutputOnsets(13) == 5
-                                  && superlooperLoopTransportStage == 6;
+  //Transport playback aligns to the recorded absolute start stage, then emits
+  //the recorded relative advances. Repeating the same segment wraps forward
+  //through all eight external-sequencer stages.
+  superlooperConfigureLoopLength(8);
+  superlooperCaptureStartIndex = 4;
+  superlooperTransportStageAtStart[4] = 5;
+  superlooperTransportTape[4][0] = 3;
+  superlooperTrackedSequencerStage = 1;
+  loopEnable = true;
+  superlooperQueuedSequencerClocks = 0;
+  superlooperPlayTransportCell(0);
+  const bool recordedStateReplayed = superlooperQueuedSequencerClocks == 7
+                                  && superlooperTrackedSequencerStage == 0;
+  superlooperQueuedSequencerClocks = 0;
+  superlooperPlayTransportCell(0);
+  const bool repeatedStateWrapped = superlooperQueuedSequencerClocks == 8
+                                 && superlooperTrackedSequencerStage == 0;
+
+  //A transport event at cell 8 is reached after 8ms at 1x, but after 1ms at
+  //the 8x speed extreme. This uses the same playback cursor as trigger tape.
+  superlooperClearTape();
+  superlooperConfigureLoopLength(8);
+  superlooperCaptureStartIndex = 0;
+  superlooperTransportStageAtStart[0] = superlooperTrackedSequencerStage;
+  superlooperTransportTape[0][4] = 1;  //Tick 8, low nibble.
+  lastClockInterval = 32000;
+  superlooperLoopBaseCell = 0;
+  superlooperLoopTransportLastTime = 0;
+  superlooperLoopTransportAccumulator = 0;
+  superlooperQueuedSequencerClocks = 0;
+  superlooperLoopSpeedControl = 512;
+  superlooperAdvanceLoopTransport(1000);
+  const bool oneXWaitsForCell = superlooperQueuedSequencerClocks == 0;
+
+  superlooperLoopBaseCell = 0;
+  superlooperLoopTransportLastTime = 0;
+  superlooperLoopTransportAccumulator = 0;
+  superlooperQueuedSequencerClocks = 0;
+  superlooperLoopSpeedControl = 1024;
+  superlooperAdvanceLoopTransport(1000);
+  const bool fastSpeedReachesCell = superlooperQueuedSequencerClocks == 1;
+  const bool playbackSpeedApplied = oneXWaitsForCell && fastSpeedReachesCell;
+
+  superlooperQueuedSequencerClocks = 2;
+  superlooperQueuedClockPulseHigh = false;
+  superlooperQueuedClockGapStarted = false;
+  superlooperQueuedClockTransitionTime = micros();
+  const bool firstQueuedPulseStarted = superlooperSequencerClockHigh()
+                                    && superlooperQueuedSequencerClocks == 1;
+  advanceMicros(externalSequencerBurstHalfPeriod);
+  const bool firstQueuedPulseEnded = !superlooperSequencerClockHigh();
+  advanceMicros(externalSequencerBurstHalfPeriod);
+  const bool secondQueuedPulseStarted = superlooperSequencerClockHigh()
+                                     && superlooperQueuedSequencerClocks == 0;
+  const bool playbackPulseWidthApplied = firstQueuedPulseStarted
+                                      && firstQueuedPulseEnded
+                                      && secondQueuedPulseStarted;
+
+  superlooperClocksPerStep = 8;
+  superlooperQueuedSequencerClocks = 2;
+  superlooperQueuedClockPulseHigh = false;
+  superlooperQueuedClockGapStarted = false;
+  superlooperQueuedClockTransitionTime = micros();
+  const bool n8FirstPulseStarted = superlooperSequencerClockHigh();
+  advanceMicros(externalSequencerBurstHalfPeriod);
+  const bool n8FirstPulseEnded = !superlooperSequencerClockHigh();
+  advanceMicros(externalSequencerBurstHalfPeriod);
+  const bool n8SecondPulseStarted = superlooperSequencerClockHigh();
+  advanceMicros(externalSequencerBurstHalfPeriod);
+  const bool n8SecondPulseEnded = !superlooperSequencerClockHigh();
+  advanceMicros(externalSequencerBurstHalfPeriod);
+  const bool drainedBurstReturnsIdle = !superlooperSequencerClockHigh()
+                                    && !superlooperQueuedClockGapStarted;
+  const bool burstCadenceIndependentOfN = n8FirstPulseStarted
+                                      && n8FirstPulseEnded
+                                      && n8SecondPulseStarted
+                                      && n8SecondPulseEnded
+                                      && drainedBurstReturnsIdle
+                                      && superlooperQueuedSequencerClocks == 0;
+  superlooperClocksPerStep = 3;
 
   return reportFirmwareRegression(
     "superlooper-n-transport",
     dividedExactly && mutationInputsUntouched
-      && midStageEntryAligned && boundaryEntryAligned,
+      && mutationJumpDivided && recordedStateReplayed && repeatedStateWrapped
+      && playbackSpeedApplied && playbackPulseWidthApplied
+      && burstCadenceIndependentOfN,
     "N3 clocks=1,0,0,1,0,0,1:" + std::to_string(dividedExactly)
       + ", mutation timing/length untouched=" + std::to_string(mutationInputsUntouched)
-      + ", entry mid/edge=" + std::to_string(midStageEntryAligned)
-      + "/" + std::to_string(boundaryEntryAligned)
+      + ", N-aware jump=" + std::to_string(mutationJumpDivided)
+      + ", replay/wrap=" + std::to_string(recordedStateReplayed)
+      + "/" + std::to_string(repeatedStateWrapped)
+      + ", speed=" + std::to_string(playbackSpeedApplied)
+      + ", pulse-width=" + std::to_string(playbackPulseWidthApplied)
+      + ", fixed-burst-N=" + std::to_string(burstCadenceIndependentOfN)
   );
 #endif
 }
@@ -1025,10 +1126,26 @@ int superlooperSkipTransportRegressionScenario() {
     superlooperSetNOption(2);  //N=3 and a fresh transport phase.
     writes.clear();
     runClockTrain(6, 50000);
+    const bool disabledUsesPlainDivision = countOutputOnsets(13) == 2;
 
-    return countOutputOnsets(13) == 2;
-  }, "Skip leaves CLOCK OUT on the exact N=3 transport",
-     "Skip added or removed pulses from the dedicated N=3 transport");
+    externalSequencerTracking = true;
+    runFor(1000);
+    superlooperResetSequencerTiming();
+    writes.clear();
+    runClockTrain(6, 50000);
+
+    unsigned int recordedAdvances = 0;
+    for (uint16_t rawClock = 0; rawClock < 27; ++rawClock) {
+      for (uint8_t tick = 0; tick < 32; ++tick) {
+        recordedAdvances += superlooperTransportAdvanceAt(rawClock, tick);
+      }
+    }
+    const bool enabledMutatesTransport = countOutputOnsets(13) > 2
+                                      && recordedAdvances > 2;
+
+    return disabledUsesPlainDivision && enabledMutatesTransport;
+  }, "Tracking gates N-aware mutation jumps and records their transport",
+     "Expected plain N=3 division when disabled and recorded jump clocks when enabled");
 #endif
 }
 

@@ -101,7 +101,11 @@ void loopCycle() {
 //Setting this high makes the clock bursts as fast as possible
 //Setting this low makes the clock bursts slow down to work with slower sequencers.
 
-void skipSteps(unsigned int numSkips) {
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
+extern bool alternateEngineActive;
+#endif
+
+void sendClockStepsDirect(unsigned int numSkips) {
 
   if (fastExternalSequencerClock) {  //if we are in the faster clock speed
     digitalWrite(clockOut, HIGH);  //make absolutely sure that the clock output is low
@@ -131,6 +135,21 @@ void skipSteps(unsigned int numSkips) {
       cTimer.every(slowClockSpeed, slowClockTimer);    //then we activate the slow speed cycle timer interupt.
     }
   }
+}
+
+void skipSteps(unsigned int numSkips) {
+
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
+  //Superlooper mutations operate in raw-clock units. Its transport adapter
+  //converts those logical advances to the N-divided external clock domain and
+  //records the emitted clocks in the transport tape.
+  if (alternateEngineActive && externalSequencerTracking && !loopEnable) {
+    superlooperAdvanceLogicalTransport(numSkips);
+    return;
+  }
+#endif
+
+  sendClockStepsDirect(numSkips);
 }
 
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
