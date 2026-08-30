@@ -62,6 +62,8 @@ void superlooperConfigureLoopLength(unsigned int requestedLength);
 void superlooperInitializeLoopTransport();
 void superlooperAdvanceLoopTransport(unsigned long currentMicros);
 uint8_t superlooperUpdateLoopPlayback();
+void superlooperPrepareAtomicBallGestures();
+void superlooperCalculateRenderedMutationOutputs();
 void superlooperResumeTapeAfterLoop();
 uint8_t superlooperRenderedLoopCellState(uint16_t phraseCell);
 uint16_t superlooperCellsPerStage();
@@ -93,6 +95,8 @@ extern uint16_t superlooperQueuedSequencerClocks;
 extern bool superlooperQueuedClockPulseHigh;
 extern bool superlooperQueuedClockGapStarted;
 extern unsigned long superlooperQueuedClockTransitionTime;
+extern bool superlooperLoopRequestPending;
+extern bool superlooperLoopRequestedState;
 #endif
 #ifdef IDUM_SIM_CONST_BREAK_TABLE
 extern const int breakBeat1[16][4][16];
@@ -151,6 +155,10 @@ extern bool trig1In;
 extern bool trig2In;
 extern bool trig3In;
 extern bool trig4In;
+extern bool trig1Edge;
+extern bool trig2Edge;
+extern bool trig3Edge;
+extern bool trig4Edge;
 extern bool trig1State;
 extern bool trig2State;
 extern bool trig3State;
@@ -187,6 +195,10 @@ extern unsigned int modifyParam2;
 extern unsigned int modifyParam3;
 extern unsigned int modifyParam4;
 extern unsigned int originalModifyLength;
+extern unsigned int originalModifyLength1;
+extern unsigned int originalModifyLength2;
+extern unsigned int originalModifyLength3;
+extern unsigned int originalModifyLength4;
 extern unsigned int paramHistory[5][8][4];
 extern unsigned int paramResolution;
 extern unsigned int probRead;
@@ -194,6 +206,9 @@ extern unsigned int probabilityModifier;
 extern unsigned int ratchetAmount;
 extern unsigned int ratchetAmount1;
 extern unsigned int trig3Divide;
+extern unsigned int trig1Divide;
+extern unsigned int trig2Divide;
+extern unsigned int trig4Divide;
 extern unsigned int unscaledParam;
 extern unsigned int unscaledParam1;
 extern unsigned int unscaledParam2;
@@ -202,6 +217,14 @@ extern unsigned int unscaledParam4;
 extern unsigned long lastTrig1Interval;
 extern unsigned long lastClockInterval;
 extern unsigned long lastClockTime;
+extern unsigned long bounce1Time;
+extern unsigned long bounce2Time;
+extern unsigned long bounce3Time;
+extern unsigned long bounce4Time;
+extern bool forceBounce1;
+extern bool forceBounce2;
+extern bool forceBounce3;
+extern bool forceBounce4;
 #if defined(IDUM_SIM_ID00M) || defined(IDUM_SIM_ELI_OO) || defined(IDUM_SIM_HAS_ATOMIC_LOOP_RECORD)
 extern volatile bool forceTrig1LoopRecord;
 extern volatile unsigned long forceTrig1LoopRecordTime;
@@ -816,6 +839,130 @@ int superlooperControlPickupRegressionScenario() {
       + ", mutation-restore/pickup=" + std::to_string(mutationControlsRestored)
       + "/" + std::to_string(mutationControlsPickedUp)
       + ", loop-speed-retained=" + std::to_string(loopSpeedRetained)
+  );
+#endif
+}
+
+int superlooperAtomicBallRegressionScenario() {
+#if IDUM_ALT_ENGINE != IDUM_ALT_ENGINE_SUPERLOOPER
+  return reportFirmwareRegression(
+    "superlooper-atomic-ball",
+    false,
+    "Superlooper is not compiled"
+  );
+#else
+  resetSimulation();
+  setup();
+  resetSuperlooperEngine();
+
+  splitMode = false;
+  externalSequencerTracking = false;
+  mode = mode1 = mode2 = mode3 = mode4 = 3;
+  modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 4;
+  modificationActive = true;
+  originalModifyLength = 4;
+  originalModifyLength1 = originalModifyLength2 = originalModifyLength3
+                        = originalModifyLength4 = 4;
+  modifyParam1 = modifyParam2 = modifyParam3 = modifyParam4 = 800;
+  unscaledParam1 = unscaledParam2 = unscaledParam3 = unscaledParam4 = 12;
+  lengthScaled = 4;
+
+  //A carryover must become a fresh gesture rather than inheriting a partially
+  //advanced divider. Its first held trigger starts the new curve.
+  startModification = true;
+  trig1Divide = 123;
+  bounce1Time = 77;
+  trig1In = true;
+  forceBounce1 = true;
+  superlooperPrepareAtomicBallGestures();
+  const unsigned int unstarted = static_cast<unsigned int>(-1);
+  const bool carryoverReset = trig1Divide == unstarted && bounce1Time == 0;
+
+  startModification = false;
+  superlooperCalculateRenderedMutationOutputs();
+  const bool firstHitStartedGesture = trig1Divide != unstarted && bounce1Time == 1;
+
+  //Once started, a later hit cannot restart the same L-step gesture.
+  const unsigned int runningDivider = trig1Divide;
+  bounce1Time = 5;
+  trig1Edge = true;
+  superlooperCalculateRenderedMutationOutputs();
+  const bool laterHitIgnored = trig1Divide == runningDivider && bounce1Time == 6;
+  trig1Edge = false;
+
+  //Live L bends the next interval calculation, while the committed duration
+  //and sampled original length remain unchanged after rendering.
+  lengthScaled = 2;
+  originalModifyLength1 = 4;
+  modifyLength1 = 4;
+  bounce1Time = runningDivider + 1;
+  superlooperCalculateRenderedMutationOutputs();
+  const unsigned int expectedDivider = runningDivider
+    + 1 + (((1025 - modifyParam1) * lengthScaled) / 8);
+  const bool liveLengthBentCurve = trig1Divide == expectedDivider;
+  const bool endpointStayedCommitted = modifyLength1 == 4
+                                    && originalModifyLength1 == 4;
+
+  return reportFirmwareRegression(
+    "superlooper-atomic-ball",
+    carryoverReset && firstHitStartedGesture && laterHitIgnored
+      && liveLengthBentCurve && endpointStayedCommitted,
+    "fresh/first/ignore/live-L/endpoint="
+      + std::to_string(carryoverReset)
+      + "/" + std::to_string(firstHitStartedGesture)
+      + "/" + std::to_string(laterHitIgnored)
+      + "/" + std::to_string(liveLengthBentCurve)
+      + "/" + std::to_string(endpointStayedCommitted)
+  );
+#endif
+}
+
+int superlooperClockSyncedLoopRequestRegressionScenario() {
+#if IDUM_ALT_ENGINE != IDUM_ALT_ENGINE_SUPERLOOPER
+  return reportFirmwareRegression(
+    "superlooper-clock-synced-loop-request",
+    false,
+    "Superlooper is not compiled"
+  );
+#else
+  resetSimulation();
+  setup();
+  resetSuperlooperEngine();
+  menuMode = false;
+  externalSequencerTracking = false;
+  lastClockInterval = 100000;
+  superlooperSequencerTimingStarted = true;
+
+  loopButtonActiveEdge = true;
+  clockEdge = false;
+  superlooperDetermineLooperStatus();
+  const bool entryWaited = !loopEnable && superlooperLoopRequestPending
+                         && superlooperLoopRequestedState;
+
+  loopButtonActiveEdge = false;
+  clockEdge = true;
+  superlooperDetermineLooperStatus();
+  const bool entryCommittedOnClock = loopEnable && !superlooperLoopRequestPending;
+
+  loopButtonActiveEdge = true;
+  clockEdge = false;
+  superlooperDetermineLooperStatus();
+  const bool exitWaited = loopEnable && superlooperLoopRequestPending
+                        && !superlooperLoopRequestedState;
+
+  loopButtonActiveEdge = false;
+  clockEdge = true;
+  superlooperDetermineLooperStatus();
+  const bool exitCommittedOnClock = !loopEnable && !superlooperLoopRequestPending;
+
+  return reportFirmwareRegression(
+    "superlooper-clock-synced-loop-request",
+    entryWaited && entryCommittedOnClock && exitWaited && exitCommittedOnClock,
+    "entry-wait/edge, exit-wait/edge="
+      + std::to_string(entryWaited)
+      + "/" + std::to_string(entryCommittedOnClock)
+      + "," + std::to_string(exitWaited)
+      + "/" + std::to_string(exitCommittedOnClock)
   );
 #endif
 }
@@ -2129,6 +2276,8 @@ int allSuperlooperRegressionsScenario() {
     "regression-alternate-engine-boundary",
     "regression-alternate-clock-tracking-contract",
     "regression-superlooper-control-pickup",
+    "regression-superlooper-atomic-ball",
+    "regression-superlooper-clock-sync",
     "regression-superlooper-anchor",
     "regression-superlooper-n-transport",
     "regression-superlooper-rendered-tape",
@@ -2207,6 +2356,8 @@ int runScenario(const std::string& name) {
   if (name == "regression-alternate-engine-boundary") return alternateEngineBoundaryRegressionScenario();
   if (name == "regression-alternate-clock-tracking-contract") return alternateClockTrackingContractRegressionScenario();
   if (name == "regression-superlooper-control-pickup") return superlooperControlPickupRegressionScenario();
+  if (name == "regression-superlooper-atomic-ball") return superlooperAtomicBallRegressionScenario();
+  if (name == "regression-superlooper-clock-sync") return superlooperClockSyncedLoopRequestRegressionScenario();
   if (name == "regression-superlooper-anchor") return superlooperAnchorRegressionScenario();
   if (name == "regression-superlooper-n-transport") return superlooperNTransportRegressionScenario();
   if (name == "regression-superlooper-rendered-tape") return superlooperRenderedTapeRegressionScenario();

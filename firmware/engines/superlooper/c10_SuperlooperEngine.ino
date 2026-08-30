@@ -48,6 +48,8 @@ uint16_t superlooperQueuedSequencerClocks = 0;
 bool superlooperQueuedClockPulseHigh = 0;
 bool superlooperQueuedClockGapStarted = 0;
 unsigned long superlooperQueuedClockTransitionTime = 0;
+bool superlooperLoopRequestPending = 0;
+bool superlooperLoopRequestedState = 0;
 
 uint16_t superlooperTapeWriteIndex = 0;
 uint8_t superlooperCaptureTick = 0;
@@ -807,17 +809,41 @@ void superlooperExitLoop() {
 }
 
 void superlooperDetermineLooperStatus() {
-  bool requested = loopEnable;
-  if (loopButtonActiveEdge && !menuMode) requested = !requested;
+  bool requested = superlooperLoopRequestPending
+    ? superlooperLoopRequestedState
+    : loopEnable;
+  bool requestChanged = 0;
+  if (loopButtonActiveEdge && !menuMode) {
+    requested = !requested;
+    requestChanged = 1;
+  }
 
   if (loopInputBehavior) {
-    if (loopGateActiveEdge) requested = 1;
-    if (loopGateFallingEdge) requested = 0;
+    if (loopGateActiveEdge) {
+      requested = 1;
+      requestChanged = 1;
+    }
+    if (loopGateFallingEdge) {
+      requested = 0;
+      requestChanged = 1;
+    }
   }
-  else if (loopGateActiveEdge) requested = !requested;
+  else if (loopGateActiveEdge) {
+    requested = !requested;
+    requestChanged = 1;
+  }
 
-  if (!loopEnable && requested) superlooperEnterLoop();
-  else if (loopEnable && !requested) superlooperExitLoop();
+  if (requestChanged) {
+    superlooperLoopRequestedState = requested;
+    superlooperLoopRequestPending = (requested != loopEnable);
+  }
+
+  //Loop changes are musical transport events. Latch controls immediately but
+  //commit both entry and exit only on a raw CLOCK edge.
+  if (!superlooperLoopRequestPending || !clockEdge) return;
+  superlooperLoopRequestPending = 0;
+  if (!loopEnable && superlooperLoopRequestedState) superlooperEnterLoop();
+  else if (loopEnable && !superlooperLoopRequestedState) superlooperExitLoop();
 }
 
 uint8_t superlooperUpdateLoopPlayback() {
@@ -865,19 +891,90 @@ uint8_t superlooperResolvedMutationTriggerMask() {
   return mask;
 }
 
+void superlooperPrepareAtomicBallGestures() {
+  const unsigned int unstarted = (unsigned int)-1;
+
+  //A SuperLooper Ball mutation is one gesture. Even a carryover starts with a
+  //fresh divider and counter; its first trigger starts the curve, and later
+  //hits cannot reinterpret it midway through the sampled L-step window.
+  if (!splitMode && startModification && (mode == 3)) {
+    trig1Divide = trig2Divide = trig3Divide = trig4Divide = unstarted;
+    bounce1Time = bounce2Time = bounce3Time = bounce4Time = 0;
+    if (!chokeDisable) {
+      if (!trig1In) trig1Choke = 0;
+      if (!trig2In) trig2Choke = 0;
+      if (!trig3In) trig3Choke = 0;
+      if (!trig4In) trig4Choke = 0;
+    }
+  }
+  else if (splitMode) {
+    if (startModification1 && (mode1 == 3)) {
+      trig1Divide = unstarted;
+      bounce1Time = 0;
+      if (!chokeDisable && !trig1In) trig1Choke = 0;
+    }
+    if (startModification2 && (mode2 == 3)) {
+      trig2Divide = unstarted;
+      bounce2Time = 0;
+      if (!chokeDisable && !trig2In) trig2Choke = 0;
+    }
+    if (startModification3 && (mode3 == 3)) {
+      trig3Divide = unstarted;
+      bounce3Time = 0;
+      if (!chokeDisable && !trig3In) trig3Choke = 0;
+    }
+    if (startModification4 && (mode4 == 3)) {
+      trig4Divide = unstarted;
+      bounce4Time = 0;
+      if (!chokeDisable && !trig4In) trig4Choke = 0;
+    }
+  }
+}
+
 void superlooperCalculateRenderedMutationOutputs() {
+  const unsigned int unstarted = (unsigned int)-1;
+  bool savedTrig1Edge = trig1Edge;
+  bool savedTrig2Edge = trig2Edge;
+  bool savedTrig3Edge = trig3Edge;
+  bool savedTrig4Edge = trig4Edge;
+  unsigned int committedLength1 = originalModifyLength1;
+  unsigned int committedLength2 = originalModifyLength2;
+  unsigned int committedLength3 = originalModifyLength3;
+  unsigned int committedLength4 = originalModifyLength4;
+
+  if ((mode1 == 3) && (trig1Divide != unstarted)) trig1Edge = 0;
+  if ((mode2 == 3) && (trig2Divide != unstarted)) trig2Edge = 0;
+  if ((mode3 == 3) && (trig3Divide != unstarted)) trig3Edge = 0;
+  if ((mode4 == 3) && (trig4Divide != unstarted)) trig4Edge = 0;
+
+  //The endpoint remains the L sampled into modifyLength at activation, while
+  //the live L control can bend the Ball curve without restarting the gesture.
+  if ((modifyLength1 > 0) && (mode1 == 3)) originalModifyLength1 = lengthScaled;
+  if ((modifyLength2 > 0) && (mode2 == 3)) originalModifyLength2 = lengthScaled;
+  if ((modifyLength3 > 0) && (mode3 == 3)) originalModifyLength3 = lengthScaled;
+  if ((modifyLength4 > 0) && (mode4 == 3)) originalModifyLength4 = lengthScaled;
+
   if (externalSequencerTracking) {
     calculateTriggerStates();
     superlooperUpdateMutationClockGate();
-    return;
+  }
+  else {
+    //Without external tracking, keep CLOCK OUT on the plain N-divided input
+    //while rendering trigger-channel mutations at their raw-clock timing.
+    unsigned int savedClockModifyLength = modifyLength;
+    modifyLength = 0;
+    calculateTriggerStates();
+    modifyLength = savedClockModifyLength;
   }
 
-  //Without external tracking, keep CLOCK OUT on the plain N-divided input
-  //while rendering trigger-channel mutations at their raw-clock timing.
-  unsigned int savedClockModifyLength = modifyLength;
-  modifyLength = 0;
-  calculateTriggerStates();
-  modifyLength = savedClockModifyLength;
+  trig1Edge = savedTrig1Edge;
+  trig2Edge = savedTrig2Edge;
+  trig3Edge = savedTrig3Edge;
+  trig4Edge = savedTrig4Edge;
+  originalModifyLength1 = committedLength1;
+  originalModifyLength2 = committedLength2;
+  originalModifyLength3 = committedLength3;
+  originalModifyLength4 = committedLength4;
 }
 
 void superlooperWriteOutputs(uint8_t triggerMask, bool sequencerClockHigh) {
@@ -962,6 +1059,7 @@ void runSuperlooperEngine() {
   }
   else {
     modifyTest();
+    superlooperPrepareAtomicBallGestures();
     superlooperCalculateRenderedMutationOutputs();
     renderedMask = superlooperResolvedMutationTriggerMask();
     superlooperRecordRenderedOutputs(renderedMask);
@@ -1001,6 +1099,8 @@ void resetSuperlooperEngine() {
   superlooperNEditArmed = 0;
   superlooperNDisplayActive = 0;
   superlooperExternalTrackingOld = externalSequencerTracking;
+  superlooperLoopRequestPending = 0;
+  superlooperLoopRequestedState = 0;
 }
 
 #endif
