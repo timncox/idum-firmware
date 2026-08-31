@@ -5,6 +5,10 @@
 #include "EEPROM.h"
 #include "engine_config.h"
 
+#ifndef IDUM_BALL_TIMING_DIAGNOSTIC
+#define IDUM_BALL_TIMING_DIAGNOSTIC 0
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -64,6 +68,30 @@ void superlooperAdvanceLoopTransport(unsigned long currentMicros);
 uint8_t superlooperUpdateLoopPlayback();
 void superlooperPrepareAtomicBallGestures();
 void superlooperCalculateRenderedMutationOutputs();
+void superlooperMutationScheduler();
+void superlooperResetMutationScheduler();
+bool superlooperMutationDebugWindowOpen(uint8_t lane);
+bool superlooperMutationDebugActive(uint8_t lane);
+uint8_t superlooperMutationDebugMode(uint8_t lane);
+unsigned long superlooperMutationDebugStart(uint8_t lane);
+unsigned long superlooperMutationDebugDuration(uint8_t lane);
+bool superlooperBallDebugStarted(uint8_t channel);
+bool superlooperBallDebugSpeeding(uint8_t channel);
+uint8_t superlooperBallDebugSampledLength(uint8_t channel);
+uint32_t superlooperBallDebugPhase(uint8_t channel);
+uint32_t superlooperBallDebugSlowRateQ8(uint8_t channel);
+uint32_t superlooperBallDebugFastRateQ8(uint8_t channel);
+uint32_t superlooperBallDebugCurrentRateQ8(uint8_t channel);
+unsigned long superlooperBallDebugMutationStart(uint8_t channel);
+unsigned long superlooperBallDebugMutationDuration(uint8_t channel);
+unsigned long superlooperBallDebugPulseStart(uint8_t channel);
+#if IDUM_BALL_TIMING_DIAGNOSTIC
+void superlooperBallTimingDiagnosticSetup();
+void superlooperBallTimingDiagnosticReset();
+void superlooperBallTimingDiagnosticBeginIteration();
+void superlooperBallTimingDiagnosticObserve();
+void superlooperBallTimingDiagnosticService();
+#endif
 void superlooperResumeTapeAfterLoop();
 uint8_t superlooperRenderedLoopCellState(uint16_t phraseCell);
 uint16_t superlooperCellsPerStage();
@@ -91,6 +119,8 @@ extern uint32_t superlooperRenderedTape[72][4];
 extern uint8_t superlooperTransportTape[72][16];
 extern uint8_t superlooperTransportStageAtStart[72];
 extern uint8_t superlooperTrackedSequencerStage;
+extern bool superlooperMutationTransportStarted;
+extern uint8_t superlooperMutationTransportPhase;
 extern uint16_t superlooperQueuedSequencerClocks;
 extern bool superlooperQueuedClockPulseHigh;
 extern bool superlooperQueuedClockGapStarted;
@@ -217,6 +247,7 @@ extern unsigned int unscaledParam4;
 extern unsigned long lastTrig1Interval;
 extern unsigned long lastClockInterval;
 extern unsigned long lastClockTime;
+extern unsigned long firstStepTime;
 extern unsigned long bounce1Time;
 extern unsigned long bounce2Time;
 extern unsigned long bounce3Time;
@@ -843,6 +874,179 @@ int superlooperControlPickupRegressionScenario() {
 #endif
 }
 
+int superlooperTriggeredMutationSchedulerRegressionScenario() {
+#if IDUM_ALT_ENGINE != IDUM_ALT_ENGINE_SUPERLOOPER
+  return reportFirmwareRegression(
+    "superlooper-triggered-mutation-scheduler",
+    false,
+    "Superlooper is not compiled"
+  );
+#else
+  resetSimulation();
+  setup();
+  resetSuperlooperEngine();
+  superlooperSetNOption(1);
+
+  splitMode = false;
+  menuMode = false;
+  lastClockInterval = 100000;
+  lengthScaled = 3;
+  modifyParam = 512;
+  unscaledParam = 8;
+  ratchetAmount = 1;
+  modePosition = 3;
+
+  //A closed clock window never launches a trigger-owned mutation.
+  probRead = 0;
+  clockEdge = true;
+  lastClockTime = micros();
+  superlooperMutationScheduler();
+  clockEdge = false;
+  trig1Edge = true;
+  superlooperMutationScheduler();
+  trig1Edge = false;
+  const bool closedWindowBlockedLaunch
+    = !superlooperMutationDebugWindowOpen(1)
+   && !superlooperMutationDebugActive(1);
+
+  //The next clock opens eligibility. An off-grid trigger owns a complete L
+  //from its own timestamp rather than inheriting the clock window's age.
+  probRead = 1024;
+  advanceMicros(100000);
+  clockEdge = true;
+  lastClockTime = micros();
+  superlooperMutationScheduler();
+  clockEdge = false;
+  advanceMicros(37000);
+  trig1Edge = true;
+  const unsigned long firstTriggerTime = micros();
+  superlooperMutationScheduler();
+  trig1Edge = false;
+  const bool offGridTriggerLaunchedFullLength
+    = superlooperMutationDebugWindowOpen(1)
+   && superlooperMutationDebugActive(1)
+   && superlooperMutationDebugMode(1) == 3
+   && superlooperMutationDebugStart(1) == firstTriggerTime
+   && superlooperMutationDebugDuration(1) == 600000
+   && originalModifyLength1 == 6;
+
+  //Changing Mode alone does not tear the gesture. A same-mode trigger also
+  //does not renew it.
+  modePosition = 5;
+  advanceMicros(10000);
+  superlooperMutationScheduler();
+  const bool modeChangeWaitedForTrigger
+    = superlooperMutationDebugMode(1) == 3
+   && superlooperMutationDebugStart(1) == firstTriggerTime;
+  modePosition = 3;
+  advanceMicros(10000);
+  trig1Edge = true;
+  superlooperMutationScheduler();
+  trig1Edge = false;
+  const bool sameModeTriggerWasIgnored
+    = superlooperMutationDebugMode(1) == 3
+   && superlooperMutationDebugStart(1) == firstTriggerTime;
+
+  //A differently selected mode on an eligible trigger intentionally preempts
+  //the old gesture and receives a fresh L from that trigger.
+  modePosition = 5;
+  lengthScaled = 2;
+  advanceMicros(10000);
+  trig1Edge = true;
+  const unsigned long replacementTime = micros();
+  superlooperMutationScheduler();
+  trig1Edge = false;
+  const bool newModePreemptedForFreshLength
+    = superlooperMutationDebugMode(1) == 5
+   && superlooperMutationDebugStart(1) == replacementTime
+   && superlooperMutationDebugDuration(1) == 400000
+   && mode1 == 5
+   && originalModifyLength1 == 4;
+
+  //Once the next clock closes eligibility, even a differently selected mode
+  //cannot replace the gesture already in flight.
+  probRead = 0;
+  advanceMicros(50000);
+  clockEdge = true;
+  lastClockTime = micros();
+  superlooperMutationScheduler();
+  clockEdge = false;
+  modePosition = 6;
+  trig1Edge = true;
+  superlooperMutationScheduler();
+  trig1Edge = false;
+  const bool closedWindowBlockedPreemption
+    = superlooperMutationDebugMode(1) == 5
+   && superlooperMutationDebugStart(1) == replacementTime;
+
+  advanceMicros(349999);
+  superlooperMutationScheduler();
+  const bool stayedActiveForFullLength = superlooperMutationDebugActive(1);
+  advanceMicros(2);
+  superlooperMutationScheduler();
+  const bool endedAtTriggerRelativeEndpoint
+    = !superlooperMutationDebugActive(1) && modifyLength1 == 0;
+
+  //L is measured in sequencer stages. At N=2, L=8 therefore owns sixteen raw
+  //clocks and produces eight external advances, returning an eight-step
+  //sequencer to the stage where the mutation began.
+  superlooperResetMutationScheduler();
+  modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 0;
+  modificationActive = false;
+  externalSequencerTracking = true;
+  alternateEngineActive = true;
+  superlooperMutationTransportStarted = false;
+  superlooperMutationTransportPhase = 0;
+  superlooperTrackedSequencerStage = 3;
+  modePosition = 0;
+  lengthScaled = 8;
+  probRead = 1024;
+  clockIn = true;
+  clockEdge = true;
+  lastClockInterval = 100000;
+  lastClockTime = micros();
+  superlooperMutationScheduler();
+  const bool n2L8UsedSixteenRawClocks = originalModifyLength == 16
+                                     && modifyLength == 16;
+  superlooperCalculateRenderedMutationOutputs();
+  clockEdge = false;
+  clockIn = false;
+  advanceMicros(20000);
+  superlooperCalculateRenderedMutationOutputs();
+  for (uint8_t rawClock = 0; rawClock < 16; ++rawClock) {
+    advanceMicros(100000);
+    clockEdge = true;
+    if (rawClock == 15) probRead = 0;
+    superlooperMutationScheduler();
+    clockEdge = false;
+  }
+  const bool n2L8ReturnedToSequencerStage
+    = superlooperTrackedSequencerStage == 3
+   && !superlooperMutationDebugActive(0);
+
+  return reportFirmwareRegression(
+    "superlooper-triggered-mutation-scheduler",
+    closedWindowBlockedLaunch && offGridTriggerLaunchedFullLength
+      && modeChangeWaitedForTrigger && sameModeTriggerWasIgnored
+      && newModePreemptedForFreshLength && closedWindowBlockedPreemption
+      && stayedActiveForFullLength
+      && endedAtTriggerRelativeEndpoint && n2L8UsedSixteenRawClocks
+      && n2L8ReturnedToSequencerStage,
+    "closed/off-grid/mode-waits/same-ignores/new-preempts/closed-preempt/full-L/end/N2L8="
+      + std::to_string(closedWindowBlockedLaunch)
+      + "/" + std::to_string(offGridTriggerLaunchedFullLength)
+      + "/" + std::to_string(modeChangeWaitedForTrigger)
+      + "/" + std::to_string(sameModeTriggerWasIgnored)
+      + "/" + std::to_string(newModePreemptedForFreshLength)
+      + "/" + std::to_string(closedWindowBlockedPreemption)
+      + "/" + std::to_string(stayedActiveForFullLength)
+      + "/" + std::to_string(endedAtTriggerRelativeEndpoint)
+      + "/" + std::to_string(n2L8UsedSixteenRawClocks
+                           && n2L8ReturnedToSequencerStage)
+  );
+#endif
+}
+
 int superlooperAtomicBallRegressionScenario() {
 #if IDUM_ALT_ENGINE != IDUM_ALT_ENGINE_SUPERLOOPER
   return reportFirmwareRegression(
@@ -854,68 +1058,204 @@ int superlooperAtomicBallRegressionScenario() {
   resetSimulation();
   setup();
   resetSuperlooperEngine();
+  superlooperSetNOption(0);
 
   splitMode = false;
   externalSequencerTracking = false;
   mode = mode1 = mode2 = mode3 = mode4 = 3;
-  modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 4;
   modificationActive = true;
-  originalModifyLength = 4;
-  originalModifyLength1 = originalModifyLength2 = originalModifyLength3
-                        = originalModifyLength4 = 4;
-  modifyParam1 = modifyParam2 = modifyParam3 = modifyParam4 = 800;
-  unscaledParam1 = unscaledParam2 = unscaledParam3 = unscaledParam4 = 12;
-  lengthScaled = 4;
-
-  //A carryover must become a fresh gesture rather than inheriting a partially
-  //advanced divider. Its first held trigger starts the new curve.
-  startModification = true;
-  trig1Divide = 123;
-  bounce1Time = 77;
-  trig1In = true;
-  forceBounce1 = true;
-  superlooperPrepareAtomicBallGestures();
   const unsigned int unstarted = static_cast<unsigned int>(-1);
-  const bool carryoverReset = trig1Divide == unstarted && bounce1Time == 0;
 
-  startModification = false;
-  superlooperCalculateRenderedMutationOutputs();
-  const bool firstHitStartedGesture = trig1Divide != unstarted && bounce1Time == 1;
+  auto prepareBall = [&](unsigned int control, unsigned int sampledLength,
+                         unsigned long triggerInterval) {
+    superlooperResetMutationScheduler();
+    modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 0;
+    modificationActive = false;
+    probRead = 1024;
+    modePosition = 3;
+    modifyParam = control;
+    unscaledParam = control > 512 ? 15 : 0;
+    ratchetAmount = 1;
+    lengthScaled = sampledLength;
+    lastClockInterval = 125000;
+    lastTrig1Interval = triggerInterval;
+    firstStepTime = lastClockTime = micros();
+    clockEdge = true;
+    superlooperMutationScheduler();
+    clockEdge = false;
+    trig1Divide = 123;
+    bounce1Time = 77;
+    trig1In = true;
+    trig1Edge = true;
+    forceBounce1 = true;
+    superlooperMutationScheduler();
+    superlooperPrepareAtomicBallGestures();
+    superlooperCalculateRenderedMutationOutputs();
+    trig1Edge = false;
+    trig1In = false;
+  };
 
-  //Once started, a later hit cannot restart the same L-step gesture.
-  const unsigned int runningDivider = trig1Divide;
-  bounce1Time = 5;
+  //Each mutation, including a carryover, owns a fresh gesture. The first hit
+  //starts it immediately and subsequent input edges cannot move its origin.
+  prepareBall(0, 4, 125000);
+  const bool carryoverReset = bounce1Time == 0;
+  const bool firstHitStartedGesture = trig1Divide != unstarted
+                                   && superlooperBallDebugStarted(0)
+                                   && trig1State;
+  const unsigned long gestureStart = superlooperBallDebugMutationStart(0);
+  const unsigned long pulseStart = superlooperBallDebugPulseStart(0);
+  advanceMicros(1000);
   trig1Edge = true;
+  superlooperMutationScheduler();
   superlooperCalculateRenderedMutationOutputs();
-  const bool laterHitIgnored = trig1Divide == runningDivider && bounce1Time == 6;
   trig1Edge = false;
+  const bool laterHitIgnored = superlooperBallDebugMutationStart(0) == gestureStart
+                            && superlooperBallDebugPulseStart(0) == pulseStart;
 
-  //Live L bends the next interval calculation, while the committed duration
-  //and sampled original length remain unchanged after rendering.
-  lengthScaled = 2;
-  originalModifyLength1 = 4;
-  modifyLength1 = 4;
-  bounce1Time = runningDivider + 1;
+  //The center is genuinely dry: it passes the input and accumulates no hidden
+  //generated-event phase while the mutation remains active.
+  prepareBall(512, 1, 125000);
+  const bool neutralPassedHit = trig1State;
+  advanceMicros(20000);
   superlooperCalculateRenderedMutationOutputs();
-  const unsigned int expectedDivider = runningDivider
-    + 1 + (((1025 - modifyParam1) * lengthScaled) / 8);
-  const bool liveLengthBentCurve = trig1Divide == expectedDivider;
+  const bool neutralStayedDry = !trig1State
+                              && superlooperBallDebugPhase(0) == 0;
+
+  //Full-left traverses slow -> fast continuously across L=1.
+  prepareBall(0, 1, 125000);
+  const uint32_t speedingStart = superlooperBallDebugCurrentRateQ8(0);
+  for (uint8_t step = 0; step < 115; ++step) {
+    advanceMicros(1000);
+    superlooperCalculateRenderedMutationOutputs();
+  }
+  const uint32_t speedingLate = superlooperBallDebugCurrentRateQ8(0);
+  const uint32_t slowRate = superlooperBallDebugSlowRateQ8(0);
+  const uint32_t fastRate = superlooperBallDebugFastRateQ8(0);
+  const bool speedingCurve = superlooperBallDebugSpeeding(0)
+                         && speedingStart == slowRate
+                         && speedingLate > slowRate + ((fastRate - slowRate) * 3 / 4);
+
+  //Full-right is the opposite curve and its fastest cadence still contains a
+  //visible low interval after each 10 ms pulse.
+  prepareBall(1024, 1, 125000);
+  const uint32_t slowingStart = superlooperBallDebugCurrentRateQ8(0);
+  advanceMicros(11000);
+  superlooperCalculateRenderedMutationOutputs();
+  const bool fastPulseHasLowGap = !trig1State;
+  for (uint8_t step = 0; step < 104; ++step) {
+    advanceMicros(1000);
+    superlooperCalculateRenderedMutationOutputs();
+  }
+  const uint32_t slowingLate = superlooperBallDebugCurrentRateQ8(0);
+  const bool slowingCurve = !superlooperBallDebugSpeeding(0)
+                         && slowingStart == fastRate
+                         && slowingLate < slowRate + ((fastRate - slowRate) / 4);
+
+  //Live L reshapes what remains, but cannot restart, extend, or phase-jump the
+  //gesture whose endpoint was committed when the mutation began.
+  prepareBall(0, 4, 100000);
+  for (uint8_t step = 0; step < 50; ++step) {
+    advanceMicros(1000);
+    superlooperCalculateRenderedMutationOutputs();
+  }
+  const uint32_t phaseBeforeLiveLength = superlooperBallDebugPhase(0);
+  const uint32_t rateBeforeLiveLength = superlooperBallDebugCurrentRateQ8(0);
+  const unsigned long durationBeforeLiveLength
+    = superlooperBallDebugMutationDuration(0);
+  lengthScaled = 1;
+  superlooperCalculateRenderedMutationOutputs();
+  const bool liveLengthWasContinuous
+    = superlooperBallDebugPhase(0) == phaseBeforeLiveLength
+   && superlooperBallDebugCurrentRateQ8(0) == rateBeforeLiveLength
+   && superlooperBallDebugMutationDuration(0) == durationBeforeLiveLength
+   && superlooperBallDebugSampledLength(0) == 4;
+  advanceMicros(1000);
+  superlooperCalculateRenderedMutationOutputs();
+  const bool liveLengthBentCurve
+    = superlooperBallDebugCurrentRateQ8(0) > rateBeforeLiveLength;
   const bool endpointStayedCommitted = modifyLength1 == 4
                                     && originalModifyLength1 == 4;
 
   return reportFirmwareRegression(
     "superlooper-atomic-ball",
     carryoverReset && firstHitStartedGesture && laterHitIgnored
+      && neutralPassedHit && neutralStayedDry && speedingCurve && slowingCurve
+      && fastPulseHasLowGap && liveLengthWasContinuous
       && liveLengthBentCurve && endpointStayedCommitted,
-    "fresh/first/ignore/live-L/endpoint="
+    "fresh/first/ignore/dry/speed-up/slow-down/gap/live-L/endpoint="
       + std::to_string(carryoverReset)
       + "/" + std::to_string(firstHitStartedGesture)
       + "/" + std::to_string(laterHitIgnored)
-      + "/" + std::to_string(liveLengthBentCurve)
+      + "/" + std::to_string(neutralPassedHit && neutralStayedDry)
+      + "/" + std::to_string(speedingCurve)
+      + "/" + std::to_string(slowingCurve)
+      + "/" + std::to_string(fastPulseHasLowGap)
+      + "/" + std::to_string(liveLengthWasContinuous && liveLengthBentCurve)
       + "/" + std::to_string(endpointStayedCommitted)
   );
 #endif
 }
+
+#if IDUM_BALL_TIMING_DIAGNOSTIC
+int superlooperBallTimingDiagnosticRegressionScenario() {
+  resetSimulation();
+  EEPROM.clear();
+  setup();
+  resetSuperlooperEngine();
+
+  clockEdge = true;
+  superlooperBallTimingDiagnosticBeginIteration();
+  clockEdge = false;
+  loopEnable = false;
+  mode1 = 3;
+  modifyLength1 = originalModifyLength1 = 1;
+  lengthScaled = 1;
+  modifyParam1 = 900;
+  unscaledParam1 = 14;
+  trig1Divide = 72;
+  superlooperBallTimingDiagnosticObserve();
+
+  for (uint16_t loopIndex = 1; loopIndex < 320; ++loopIndex) {
+    superlooperBallTimingDiagnosticBeginIteration();
+  }
+
+  lastClockInterval = 125000;
+  clockEdge = true;
+  superlooperBallTimingDiagnosticBeginIteration();
+
+  const uint8_t base = 32;
+  const uint16_t savedLoops = EEPROM.read(base + 2)
+                            | ((uint16_t)EEPROM.read(base + 3) << 8);
+  uint32_t savedInterval = 0;
+  for (uint8_t byteIndex = 0; byteIndex < 4; ++byteIndex) {
+    savedInterval |= (uint32_t)EEPROM.read(base + 4 + byteIndex)
+                  << (byteIndex * 8);
+  }
+  const uint16_t savedParam = EEPROM.read(base + 8)
+                            | ((uint16_t)EEPROM.read(base + 9) << 8);
+  const uint16_t savedStartDivider = EEPROM.read(base + 13)
+                                   | ((uint16_t)EEPROM.read(base + 14) << 8);
+  const bool passed = EEPROM.read(base) == 0xb7
+                   && savedLoops == 320
+                   && savedInterval == 125000
+                   && savedParam == 900
+                   && EEPROM.read(base + 10) == 1
+                   && EEPROM.read(base + 11) == 1
+                   && EEPROM.read(base + 12) == 1
+                   && savedStartDivider == 72;
+  return reportFirmwareRegression(
+    "superlooper-ball-timing-diagnostic",
+    passed,
+    "loops/clock-us/param/L/direction/divider="
+      + std::to_string(savedLoops)
+      + "/" + std::to_string(savedInterval)
+      + "/" + std::to_string(savedParam)
+      + "/" + std::to_string(EEPROM.read(base + 10))
+      + "/" + std::to_string(EEPROM.read(base + 12))
+      + "/" + std::to_string(savedStartDivider)
+  );
+}
+#endif
 
 int superlooperClockSyncedLoopRequestRegressionScenario() {
 #if IDUM_ALT_ENGINE != IDUM_ALT_ENGINE_SUPERLOOPER
@@ -2276,6 +2616,7 @@ int allSuperlooperRegressionsScenario() {
     "regression-alternate-engine-boundary",
     "regression-alternate-clock-tracking-contract",
     "regression-superlooper-control-pickup",
+    "regression-superlooper-triggered-mutation-scheduler",
     "regression-superlooper-atomic-ball",
     "regression-superlooper-clock-sync",
     "regression-superlooper-anchor",
@@ -2356,7 +2697,11 @@ int runScenario(const std::string& name) {
   if (name == "regression-alternate-engine-boundary") return alternateEngineBoundaryRegressionScenario();
   if (name == "regression-alternate-clock-tracking-contract") return alternateClockTrackingContractRegressionScenario();
   if (name == "regression-superlooper-control-pickup") return superlooperControlPickupRegressionScenario();
+  if (name == "regression-superlooper-triggered-mutation-scheduler") return superlooperTriggeredMutationSchedulerRegressionScenario();
   if (name == "regression-superlooper-atomic-ball") return superlooperAtomicBallRegressionScenario();
+#if IDUM_BALL_TIMING_DIAGNOSTIC
+  if (name == "regression-superlooper-ball-timing-diagnostic") return superlooperBallTimingDiagnosticRegressionScenario();
+#endif
   if (name == "regression-superlooper-clock-sync") return superlooperClockSyncedLoopRequestRegressionScenario();
   if (name == "regression-superlooper-anchor") return superlooperAnchorRegressionScenario();
   if (name == "regression-superlooper-n-transport") return superlooperNTransportRegressionScenario();

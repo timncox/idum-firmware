@@ -34,8 +34,12 @@ void setup() {
 
   readStartupButtonStates();
 
-#if IDUM_ADC_DIAGNOSTIC
+#if IDUM_ADC_DIAGNOSTIC || IDUM_BALL_TIMING_DIAGNOSTIC
   Serial.begin(115200);
+#endif
+
+#if IDUM_BALL_TIMING_DIAGNOSTIC && IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
+  superlooperBallTimingDiagnosticSetup();
 #endif
 
   if (printEnable) Serial.begin(9600);  //only setup the serial communication if printing is enabled.  Causes the MCU to work way slower.

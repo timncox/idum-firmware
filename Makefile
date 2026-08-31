@@ -34,7 +34,7 @@ SIM_DEFINES ?= -DIDUM_SIM_HAS_ADC_DIAGNOSTIC=1 -DIDUM_SIM_HAS_RNG_SEEDING=1 -DID
 SIM_BUILD := build/sim/idum-sim-$(ALT_ENGINE)
 SIM_INCLUDE_FLAGS := -Isim -I$(SIM_FIRMWARE) -I$(ENGINE_SOURCE)
 
-.PHONY: help doctor setup stage-sketch require-alternate-engine build superlooper-build upload safe-io-build safe-io-upload adc-diagnostic-build adc-diagnostic-upload clean board-list sim sim-compile sim-modes sim-alternate-modes sim-regressions sim-stock-parity test-stock-reference test-superlooper test-all sim-clock-stop sim-break-patterns sim-break-playback sim-id00m-regressions sim-clean
+.PHONY: help doctor setup stage-sketch require-alternate-engine build superlooper-build upload safe-io-build safe-io-upload adc-diagnostic-build adc-diagnostic-upload ball-timing-diagnostic-build ball-timing-diagnostic-upload ball-timing-diagnostic-test clean board-list sim sim-compile sim-modes sim-alternate-modes sim-regressions sim-stock-parity test-stock-reference test-superlooper test-all sim-clock-stop sim-break-patterns sim-break-playback sim-id00m-regressions sim-clean
 
 help:
 	@echo "Alt-DUM firmware build targets"
@@ -47,6 +47,8 @@ help:
 	@echo "  make safe-io-upload PORT=<port> Upload normal Arduino pin I/O firmware"
 	@echo "  make adc-diagnostic-build Compile USB ADC diagnostic firmware"
 	@echo "  make adc-diagnostic-upload PORT=<port> Upload USB ADC diagnostic firmware"
+	@echo "  make ball-timing-diagnostic-build Compile the EEPROM-backed Ball loop-speed probe"
+	@echo "  make ball-timing-diagnostic-upload PORT=<port> Upload the Ball loop-speed probe"
 	@echo "  make sim                  Build and run the host-side simulator smoke test"
 	@echo "  make sim-modes            Build and run simulator scenarios for all modes"
 	@echo "  make sim-alternate-modes  Run every mode through the selected alternate runner"
@@ -115,6 +117,17 @@ adc-diagnostic-build: require-alternate-engine stage-sketch
 adc-diagnostic-upload: stage-sketch
 	@if [ -z "$(PORT)" ]; then echo "Set PORT, for example: make adc-diagnostic-upload PORT=/dev/cu.usbmodem101"; exit 2; fi
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) upload -p $(PORT) --fqbn $(FQBN) --input-dir $(BUILD_PATH)-adc $(SKETCH)
+
+ball-timing-diagnostic-build:
+	$(MAKE) build ALT_ENGINE=superlooper FIRMWARE_DEFINES=-DIDUM_BALL_TIMING_DIAGNOSTIC=1 BUILD_PATH=build/idum-superlooper-ball-timing FIRMWARE_BASENAME=alt-dum-superlooper-ball-timing
+
+ball-timing-diagnostic-upload: stage-sketch
+	@if [ -z "$(PORT)" ]; then echo "Set PORT, for example: make ball-timing-diagnostic-upload PORT=/dev/cu.usbmodem101"; exit 2; fi
+	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) upload -p $(PORT) --fqbn $(FQBN) --input-dir build/idum-superlooper-ball-timing $(SKETCH)
+
+ball-timing-diagnostic-test:
+	$(MAKE) sim-compile ALT_ENGINE=superlooper FIRMWARE_DEFINES=-DIDUM_BALL_TIMING_DIAGNOSTIC=1 SIM_BUILD=build/sim/idum-sim-superlooper-ball-timing
+	build/sim/idum-sim-superlooper-ball-timing regression-superlooper-ball-timing-diagnostic
 
 board-list:
 	$(ARDUINO_CLI) --config-file $(ARDUINO_CONFIG) board list

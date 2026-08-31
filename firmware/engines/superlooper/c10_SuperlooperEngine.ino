@@ -1,11 +1,12 @@
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\
 // Superlooper: an independently selectable rendered-output tape engine.
 //
-// Raw CLOCK IN continues to drive the stock mutation state machine. N defines
-// external-sequencer clock division and the number of raw clocks in a loop
-// stage. With external tracking enabled, a separate event tape records the
-// N-divided sequencer advances produced by mutations. While LOOP is active the
-// four trigger outputs and the transport events are read from their tapes.
+// Raw CLOCK IN opens Chance windows; CLOCK/TRIGGER lane edges launch mutations.
+// N defines external-sequencer clock division, raw clocks per loop stage, and
+// therefore the L*N raw-clock lifetime of a mutation. With external tracking
+// enabled, a separate event tape records sequencer advances produced by those
+// mutations. While LOOP is active the four trigger outputs and transport events
+// are read from their tapes.
 //////////////////////////////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\
 
 #if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
@@ -50,6 +51,58 @@ bool superlooperQueuedClockGapStarted = 0;
 unsigned long superlooperQueuedClockTransitionTime = 0;
 bool superlooperLoopRequestPending = 0;
 bool superlooperLoopRequestedState = 0;
+
+struct SuperlooperMutationLaneState {
+  bool active;
+  uint8_t activeMode;
+  uint8_t sampledLength;
+  uint8_t clocksRemaining;
+  unsigned long startMicros;
+  unsigned long durationMicros;
+};
+
+//Lane zero is CLOCK; lanes one through four are TR1-TR4. A clock edge opens
+//eligibility windows, while the corresponding lane edge owns the mutation.
+SuperlooperMutationLaneState superlooperMutationLanes[5] = {};
+bool superlooperMutationWindows[5] = {};
+
+const unsigned long SUPERLOOPER_BALL_FAST_LOW_MICROS = 4000UL;
+const uint32_t SUPERLOOPER_BALL_PHASE_ONE = 256000000UL;
+const unsigned long SUPERLOOPER_BALL_CONTROL_SLEW_MICROS = 8000UL;
+
+struct SuperlooperBallState {
+  bool prepared;
+  bool started;
+  bool speeding;
+  uint8_t sampledLength;
+  uint8_t liveLength;
+  uint16_t strengthQ8;
+  unsigned long mutationStartMicros;
+  unsigned long mutationDurationMicros;
+  unsigned long lastUpdateMicros;
+  unsigned long pulseStartMicros;
+  uint32_t phase;
+  uint32_t slowRateQ8;
+  uint32_t fastRateQ8;
+  uint32_t currentRateQ8;
+};
+
+SuperlooperBallState superlooperBallStates[4] = {};
+
+#if IDUM_BALL_TIMING_DIAGNOSTIC
+const uint8_t SUPERLOOPER_BALL_DIAG_EEPROM_BASE = 32;
+const uint8_t SUPERLOOPER_BALL_DIAG_MAGIC = 0xb7;
+bool superlooperBallDiagClockSeen = 0;
+bool superlooperBallDiagIntervalActive = 0;
+bool superlooperBallDiagCaptureWritten = 0;
+uint32_t superlooperBallDiagLoopCount = 0;
+unsigned int superlooperBallDiagParam = 0;
+uint8_t superlooperBallDiagSampledLength = 0;
+uint8_t superlooperBallDiagLiveLength = 0;
+uint8_t superlooperBallDiagExpanding = 0;
+unsigned int superlooperBallDiagStartDivider = 0;
+unsigned long superlooperBallDiagLastPrint = 0;
+#endif
 
 uint16_t superlooperTapeWriteIndex = 0;
 uint8_t superlooperCaptureTick = 0;
@@ -111,6 +164,7 @@ uint16_t superlooperActiveRecordClockCount() {
 }
 
 void superlooperExitLoop();
+void superlooperResetMutationScheduler();
 
 uint16_t superlooperWrapRecordIndex(long index) {
   long count = superlooperActiveRecordClockCount();
@@ -432,9 +486,8 @@ void superlooperAdvanceSequencerTiming() {
 void superlooperRecordRenderedOutputs(uint8_t stateMask) {
   if (loopEnable || !superlooperSequencerTimingStarted) return;
 
-  //Most passes through the stock renderer do not change an output. Avoid a
-  //32-bit phase division on those passes: ball timing intentionally depends
-  //on loop cadence, so the tape recorder must make the common path tiny.
+  //Most passes through the renderer do not change an output. Avoid a 32-bit
+  //phase division on those passes so time-domain modes retain prompt service.
   if (stateMask == superlooperCaptureStateMask) return;
 
   uint8_t currentTick = superlooperSubClockPhase(micros());
@@ -527,9 +580,8 @@ void superlooperQueueTrackedSequencerClocks(unsigned int clockCount) {
 }
 
 void superlooperServiceQueuedClock() {
-  //Ball timing intentionally follows main-loop cadence. Keep the common idle
-  //path free of micros() and transport work so enabling external tracking does
-  //not change the established Ball feel when no burst is being emitted.
+  //Keep the common idle path free of micros() and transport work so generated
+  //trigger timing retains prompt service when no burst is being emitted.
   if ((superlooperQueuedSequencerClocks == 0)
       && !superlooperQueuedClockPulseHigh
       && !superlooperQueuedClockGapStarted) return;
@@ -786,6 +838,7 @@ void superlooperEnterLoop() {
   modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 0;
   modificationActive = 0;
   carryOverActive = 0;
+  superlooperResetMutationScheduler();
   saveLoopData();
 }
 
@@ -804,6 +857,7 @@ void superlooperExitLoop() {
   superlooperResumeTapeAfterLoop();
   modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 0;
   modificationActive = 0;
+  superlooperResetMutationScheduler();
   superlooperArmControlPickup(0);
   saveLoopData();
 }
@@ -877,6 +931,307 @@ uint8_t superlooperUpdateLoopPlayback() {
        | superlooperLoopCrossedTriggerMask;
 }
 
+unsigned int superlooperMutationRawClockCount(unsigned int sampledLength) {
+  sampledLength = max((unsigned int)1, sampledLength);
+  return sampledLength * superlooperClocksPerStep;
+}
+
+unsigned long superlooperMutationDurationMicros(unsigned int sampledLength) {
+  unsigned long period = lastClockInterval > 0 ? lastClockInterval : 125000UL;
+  unsigned int rawClockCount = superlooperMutationRawClockCount(sampledLength);
+  if (period > (ULONG_MAX / rawClockCount)) return ULONG_MAX;
+  return period * rawClockCount;
+}
+
+void superlooperResetMutationScheduler() {
+  for (uint8_t lane = 0; lane < 5; ++lane) {
+    superlooperMutationLanes[lane] = SuperlooperMutationLaneState {};
+    superlooperMutationWindows[lane] = 0;
+  }
+  startModification = startModification1 = startModification2
+                    = startModification3 = startModification4 = 0;
+  endModification = endModification1 = endModification2
+                  = endModification3 = endModification4 = 0;
+  carryOver = carryOver1 = carryOver2 = carryOver3 = carryOver4 = 0;
+  carryOverActive = 0;
+}
+
+void superlooperSetTriggerLaneLength(uint8_t channel, unsigned int value) {
+  if (channel == 0) modifyLength1 = value;
+  if (channel == 1) modifyLength2 = value;
+  if (channel == 2) modifyLength3 = value;
+  if (channel == 3) modifyLength4 = value;
+}
+
+void superlooperSetTriggerLaneOriginalLength(uint8_t channel, unsigned int value) {
+  if (channel == 0) originalModifyLength1 = value;
+  if (channel == 1) originalModifyLength2 = value;
+  if (channel == 2) originalModifyLength3 = value;
+  if (channel == 3) originalModifyLength4 = value;
+}
+
+void superlooperSetTriggerLaneMode(uint8_t channel, unsigned int value) {
+  if (channel == 0) mode1 = value;
+  if (channel == 1) mode2 = value;
+  if (channel == 2) mode3 = value;
+  if (channel == 3) mode4 = value;
+}
+
+void superlooperSetTriggerLaneParam(uint8_t channel) {
+  if (channel == 0) {
+    modifyParam1 = modifyParam;
+    unscaledParam1 = unscaledParam;
+    ratchetAmount1 = ratchetAmount;
+  }
+  if (channel == 1) {
+    modifyParam2 = modifyParam;
+    unscaledParam2 = unscaledParam;
+    ratchetAmount2 = ratchetAmount;
+  }
+  if (channel == 2) {
+    modifyParam3 = modifyParam;
+    unscaledParam3 = unscaledParam;
+    ratchetAmount3 = ratchetAmount;
+  }
+  if (channel == 3) {
+    modifyParam4 = modifyParam;
+    unscaledParam4 = unscaledParam;
+    ratchetAmount4 = ratchetAmount;
+  }
+}
+
+void superlooperSetTriggerLaneStartFlag(uint8_t channel) {
+  if (channel == 0) startModification1 = 1;
+  if (channel == 1) startModification2 = 1;
+  if (channel == 2) startModification3 = 1;
+  if (channel == 3) startModification4 = 1;
+}
+
+void superlooperResetTriggerLaneModeState(uint8_t channel, uint8_t selectedMode) {
+  if (channel == 0) {
+    trig1Divide = (unsigned int)-1;
+    bounce1Time = 0;
+    breakIndex1 = 0;
+    forceBounce1 = (selectedMode == 3) && trig1In;
+  }
+  if (channel == 1) {
+    trig2Divide = (unsigned int)-1;
+    bounce2Time = 0;
+    breakIndex2 = 0;
+    forceBounce2 = (selectedMode == 3) && trig2In;
+  }
+  if (channel == 2) {
+    trig3Divide = (unsigned int)-1;
+    bounce3Time = 0;
+    breakIndex3 = 0;
+    forceBounce3 = (selectedMode == 3) && trig3In;
+  }
+  if (channel == 3) {
+    trig4Divide = (unsigned int)-1;
+    bounce4Time = 0;
+    breakIndex4 = 0;
+    forceBounce4 = (selectedMode == 3) && trig4In;
+  }
+}
+
+void superlooperApplyLaunchProbabilityPenalty(uint8_t lane, uint8_t sampledLength) {
+  unsigned int penalty = sampledLength - 1;
+  if (!splitMode || (lane == 0)) {
+    probabilityModifier = max(probabilityModifier, penalty);
+    return;
+  }
+  if (lane == 1) probabilityModifier1 = max(probabilityModifier1, penalty);
+  if (lane == 2) probabilityModifier2 = max(probabilityModifier2, penalty);
+  if (lane == 3) probabilityModifier3 = max(probabilityModifier3, penalty);
+  if (lane == 4) probabilityModifier4 = max(probabilityModifier4, penalty);
+}
+
+void superlooperEndClockMutation() {
+  SuperlooperMutationLaneState &state = superlooperMutationLanes[0];
+  if (!state.active) return;
+
+  if (((originalModifyLength > 1) || (mode == 7))
+      && externalSequencerTracking) {
+    maintainCycle();
+  }
+  state.active = 0;
+  state.clocksRemaining = 0;
+  modifyLength = 0;
+  endModification = 1;
+}
+
+void superlooperEndTriggerMutation(uint8_t channel) {
+  SuperlooperMutationLaneState &state = superlooperMutationLanes[channel + 1];
+  state.active = 0;
+  superlooperSetTriggerLaneLength(channel, 0);
+  if (channel == 0) endModification1 = 1;
+  if (channel == 1) endModification2 = 1;
+  if (channel == 2) endModification3 = 1;
+  if (channel == 3) endModification4 = 1;
+}
+
+void superlooperLaunchClockMutation(uint8_t selectedMode, unsigned long currentMicros) {
+  SuperlooperMutationLaneState &state = superlooperMutationLanes[0];
+  if (state.active) superlooperEndClockMutation();
+
+  uint8_t sampledLength = max((unsigned int)1, lengthScaled);
+  unsigned int rawClockCount = superlooperMutationRawClockCount(sampledLength);
+  state.active = 1;
+  state.activeMode = selectedMode;
+  state.sampledLength = sampledLength;
+  state.clocksRemaining = rawClockCount;
+  state.startMicros = currentMicros;
+  state.durationMicros = superlooperMutationDurationMicros(sampledLength);
+
+  mode = selectedMode;
+  modifyLength = originalModifyLength = rawClockCount;
+  firstStepTime = currentMicros;
+  startModification = 1;
+  clockDivide = (unsigned int)-1;
+  if (selectedMode == 7) {
+    setClockSkipMode();
+    forceSkip = clockIn;
+    clockSkipCycleCount = 0;
+    clockRatchetCycleCount = 0;
+    clockRatchetStateOld = 0;
+  }
+  superlooperApplyLaunchProbabilityPenalty(0, sampledLength);
+}
+
+void superlooperLaunchTriggerMutation(
+  uint8_t channel,
+  uint8_t selectedMode,
+  unsigned long currentMicros
+) {
+  SuperlooperMutationLaneState &state = superlooperMutationLanes[channel + 1];
+  uint8_t sampledLength = max((unsigned int)1, lengthScaled);
+  unsigned int rawClockCount = superlooperMutationRawClockCount(sampledLength);
+  state.active = 1;
+  state.activeMode = selectedMode;
+  state.sampledLength = sampledLength;
+  state.clocksRemaining = 0;
+  state.startMicros = currentMicros;
+  state.durationMicros = superlooperMutationDurationMicros(sampledLength);
+
+  superlooperSetTriggerLaneMode(channel, selectedMode);
+  superlooperSetTriggerLaneLength(channel, rawClockCount);
+  superlooperSetTriggerLaneOriginalLength(channel, rawClockCount);
+  superlooperSetTriggerLaneParam(channel);
+  superlooperSetTriggerLaneStartFlag(channel);
+  superlooperResetTriggerLaneModeState(channel, selectedMode);
+  superlooperApplyLaunchProbabilityPenalty(channel + 1, sampledLength);
+}
+
+unsigned int superlooperProbabilityRoll(unsigned int penalty) {
+  return min(random(probabilityUpperThreshold)
+             + (penalty * probabilityLengthPenalty),
+             probabilityUpperThreshold);
+}
+
+bool superlooperWindowFromRoll(unsigned int roll) {
+  return (roll < probRead) && (probRead > probabilityLowerThreshold) && !menuMode;
+}
+
+void superlooperOpenMutationWindows() {
+  if (!clockEdge) return;
+
+  if (probabilityModifier > 0) probabilityModifier -= 1;
+  if (probabilityModifier1 > 0) probabilityModifier1 -= 1;
+  if (probabilityModifier2 > 0) probabilityModifier2 -= 1;
+  if (probabilityModifier3 > 0) probabilityModifier3 -= 1;
+  if (probabilityModifier4 > 0) probabilityModifier4 -= 1;
+
+  randomValue = superlooperProbabilityRoll(probabilityModifier);
+  superlooperMutationWindows[0] = superlooperWindowFromRoll(randomValue);
+  if (!splitMode) {
+    for (uint8_t lane = 1; lane < 5; ++lane) {
+      superlooperMutationWindows[lane] = superlooperMutationWindows[0];
+    }
+    randomValue1 = randomValue2 = randomValue3 = randomValue4 = randomValue;
+    return;
+  }
+
+  randomValue1 = superlooperProbabilityRoll(probabilityModifier1);
+  randomValue2 = superlooperProbabilityRoll(probabilityModifier2);
+  randomValue3 = superlooperProbabilityRoll(probabilityModifier3);
+  randomValue4 = superlooperProbabilityRoll(probabilityModifier4);
+  superlooperMutationWindows[1] = superlooperWindowFromRoll(randomValue1);
+  superlooperMutationWindows[2] = superlooperWindowFromRoll(randomValue2);
+  superlooperMutationWindows[3] = superlooperWindowFromRoll(randomValue3);
+  superlooperMutationWindows[4] = superlooperWindowFromRoll(randomValue4);
+}
+
+void superlooperExpireMutations(unsigned long currentMicros) {
+  if (clockEdge && superlooperMutationLanes[0].active
+      && (currentMicros != superlooperMutationLanes[0].startMicros)) {
+    SuperlooperMutationLaneState &clockLane = superlooperMutationLanes[0];
+    if (clockLane.clocksRemaining > 0) clockLane.clocksRemaining -= 1;
+    modifyLength = clockLane.clocksRemaining;
+    if (clockLane.clocksRemaining == 0) superlooperEndClockMutation();
+  }
+
+  for (uint8_t channel = 0; channel < 4; ++channel) {
+    SuperlooperMutationLaneState &state = superlooperMutationLanes[channel + 1];
+    if (state.active && ((currentMicros - state.startMicros) >= state.durationMicros)) {
+      superlooperEndTriggerMutation(channel);
+    }
+  }
+}
+
+void superlooperConsiderClockMutation(unsigned long currentMicros) {
+  if (!clockEdge || !superlooperMutationWindows[0]) return;
+  uint8_t selectedMode = modePosition;
+  SuperlooperMutationLaneState &state = superlooperMutationLanes[0];
+  if (!state.active || (state.activeMode != selectedMode)) {
+    superlooperLaunchClockMutation(selectedMode, currentMicros);
+  }
+}
+
+void superlooperConsiderTriggerMutation(
+  uint8_t channel,
+  bool triggerEdge,
+  unsigned long currentMicros
+) {
+  if (!triggerEdge || !superlooperMutationWindows[channel + 1]) return;
+  uint8_t selectedMode = modePosition;
+  SuperlooperMutationLaneState &state = superlooperMutationLanes[channel + 1];
+  if (!state.active || (state.activeMode != selectedMode)) {
+    superlooperLaunchTriggerMutation(channel, selectedMode, currentMicros);
+  }
+}
+
+void superlooperMutationScheduler() {
+  startModification = startModification1 = startModification2
+                    = startModification3 = startModification4 = 0;
+  endModification = endModification1 = endModification2
+                  = endModification3 = endModification4 = 0;
+  carryOver = carryOver1 = carryOver2 = carryOver3 = carryOver4 = 0;
+  carryOverActive = 0;
+
+  unsigned long currentMicros = micros();
+  if (modeBtnFallingEdge) {
+    superlooperEndClockMutation();
+    for (uint8_t channel = 0; channel < 4; ++channel) {
+      if (superlooperMutationLanes[channel + 1].active) {
+        superlooperEndTriggerMutation(channel);
+      }
+    }
+  }
+
+  superlooperExpireMutations(currentMicros);
+  superlooperOpenMutationWindows();
+  superlooperConsiderClockMutation(currentMicros);
+  superlooperConsiderTriggerMutation(0, trig1Edge, currentMicros);
+  superlooperConsiderTriggerMutation(1, trig2Edge, currentMicros);
+  superlooperConsiderTriggerMutation(2, trig3Edge, currentMicros);
+  superlooperConsiderTriggerMutation(3, trig4Edge, currentMicros);
+
+  modificationActive = 0;
+  for (uint8_t lane = 0; lane < 5; ++lane) {
+    if (superlooperMutationLanes[lane].active) modificationActive = 1;
+  }
+}
+
 uint8_t superlooperResolvedMutationTriggerMask() {
   bool output1Choke = ((modifyLength1 > 0) && (mode1 == 4)) ? rotate1Choke : trig1Choke;
   bool output2Choke = ((modifyLength2 > 0) && (mode2 == 4)) ? rotate2Choke : trig2Choke;
@@ -891,45 +1246,467 @@ uint8_t superlooperResolvedMutationTriggerMask() {
   return mask;
 }
 
-void superlooperPrepareAtomicBallGestures() {
-  const unsigned int unstarted = (unsigned int)-1;
+uint16_t superlooperBallStrengthQ8(unsigned int control) {
+  control = min((unsigned int)1024, control);
 
-  //A SuperLooper Ball mutation is one gesture. Even a carryover starts with a
-  //fresh divider and counter; its first trigger starts the curve, and later
-  //hits cannot reinterpret it midway through the sampled L-step window.
-  if (!splitMode && startModification && (mode == 3)) {
-    trig1Divide = trig2Divide = trig3Divide = trig4Divide = unstarted;
-    bounce1Time = bounce2Time = bounce3Time = bounce4Time = 0;
-    if (!chokeDisable) {
-      if (!trig1In) trig1Choke = 0;
-      if (!trig2In) trig2Choke = 0;
-      if (!trig3In) trig3Choke = 0;
-      if (!trig4In) trig4Choke = 0;
-    }
+  //The center is a true dry zone. Moving away from it continuously adds more
+  //of the curve, reaching the full excursion only at the ends of the control.
+  if (control < 480) return ((uint32_t)(480 - control) * 256) / 480;
+  if (control > 544) return ((uint32_t)(control - 544) * 256) / 480;
+  return 0;
+}
+
+uint32_t superlooperBallRateQ8ForPeriod(unsigned long periodMicros) {
+  unsigned long fastPeriod = generatedTriggerPulseWidth
+                           + SUPERLOOPER_BALL_FAST_LOW_MICROS;
+  periodMicros = max(fastPeriod, periodMicros);
+  return SUPERLOOPER_BALL_PHASE_ONE / periodMicros;
+}
+
+unsigned long superlooperBallTriggerInterval(uint8_t channel) {
+  unsigned long triggerInterval = 0;
+  if (channel == 0) triggerInterval = lastTrig1Interval;
+  if (channel == 1) triggerInterval = lastTrig2Interval;
+  if (channel == 2) triggerInterval = lastTrig3Interval;
+  if (channel == 3) triggerInterval = lastTrig4Interval;
+
+  unsigned long fastPeriod = generatedTriggerPulseWidth
+                           + SUPERLOOPER_BALL_FAST_LOW_MICROS;
+  bool plausible = triggerInterval >= fastPeriod;
+  if (plausible && (lastClockInterval > 0)) {
+    unsigned long longestPlausible = lastClockInterval > (ULONG_MAX / 16UL)
+      ? ULONG_MAX
+      : lastClockInterval * 16UL;
+    plausible = triggerInterval <= longestPlausible;
   }
-  else if (splitMode) {
-    if (startModification1 && (mode1 == 3)) {
-      trig1Divide = unstarted;
-      bounce1Time = 0;
-      if (!chokeDisable && !trig1In) trig1Choke = 0;
-    }
-    if (startModification2 && (mode2 == 3)) {
-      trig2Divide = unstarted;
-      bounce2Time = 0;
-      if (!chokeDisable && !trig2In) trig2Choke = 0;
-    }
-    if (startModification3 && (mode3 == 3)) {
-      trig3Divide = unstarted;
-      bounce3Time = 0;
-      if (!chokeDisable && !trig3In) trig3Choke = 0;
-    }
-    if (startModification4 && (mode4 == 3)) {
-      trig4Divide = unstarted;
-      bounce4Time = 0;
-      if (!chokeDisable && !trig4In) trig4Choke = 0;
+  if (plausible) return triggerInterval;
+  if (lastClockInterval >= fastPeriod) return lastClockInterval;
+  return max(fastPeriod, 125000UL);
+}
+
+uint16_t superlooperBallProgressQ8(
+  uint8_t channel,
+  unsigned long currentMicros
+) {
+  const SuperlooperBallState &state = superlooperBallStates[channel];
+  if (state.mutationDurationMicros == 0) return 256;
+  unsigned long elapsed = currentMicros - state.mutationStartMicros;
+  if (elapsed >= state.mutationDurationMicros) return 256;
+
+  uint16_t linear;
+  if (elapsed <= (ULONG_MAX / 256UL)) {
+    linear = ((uint32_t)elapsed * 256UL) / state.mutationDurationMicros;
+  }
+  else {
+    //Only extraordinarily slow clocks reach this path. Scaling the divisor
+    //first avoids wrapping the 32-bit numerator while preserving the shape.
+    linear = min((unsigned long)255,
+      elapsed / max(1UL, state.mutationDurationMicros / 256UL));
+  }
+  uint16_t curved = linear;
+  uint16_t squared = ((uint32_t)linear * linear) / 256;
+  uint8_t sampled = max((uint8_t)1, state.sampledLength);
+  uint8_t live = max((uint8_t)1, state.liveLength);
+
+  if (live < sampled) curved = (2 * linear) - squared;
+  else if (live > sampled) curved = squared;
+  else return linear;
+
+  uint8_t distance = live > sampled ? live - sampled : sampled - live;
+  uint16_t blend = min((uint16_t)256, (uint16_t)(distance * 36));
+  return (((uint32_t)linear * (256 - blend))
+       + ((uint32_t)curved * blend)) / 256;
+}
+
+uint32_t superlooperBallTargetRateQ8(
+  uint8_t channel,
+  unsigned int control,
+  unsigned long currentMicros
+) {
+  SuperlooperBallState &state = superlooperBallStates[channel];
+  state.strengthQ8 = superlooperBallStrengthQ8(control);
+  state.speeding = control < 512;
+  uint16_t progress = superlooperBallProgressQ8(channel, currentMicros);
+  uint16_t directionProgress = state.speeding ? progress : 256 - progress;
+  uint32_t excursion = state.fastRateQ8 - state.slowRateQ8;
+  uint32_t scaledProgress = ((uint32_t)state.strengthQ8 * directionProgress) / 256;
+  return state.slowRateQ8 + ((excursion * scaledProgress) / 256);
+}
+
+void superlooperPrepareBallChannel(uint8_t channel, unsigned int sampledLength) {
+  SuperlooperBallState &state = superlooperBallStates[channel];
+  SuperlooperMutationLaneState &mutation = superlooperMutationLanes[channel + 1];
+  state.prepared = 1;
+  state.started = 0;
+  state.sampledLength = max((unsigned int)1, sampledLength);
+  state.liveLength = max((unsigned int)1, lengthScaled);
+  state.strengthQ8 = 0;
+  state.mutationStartMicros = mutation.active ? mutation.startMicros : micros();
+  state.mutationDurationMicros = mutation.active
+    ? mutation.durationMicros
+    : superlooperMutationDurationMicros(state.sampledLength);
+  state.lastUpdateMicros = state.mutationStartMicros;
+  state.pulseStartMicros = state.mutationStartMicros;
+  state.phase = 0;
+  state.slowRateQ8 = superlooperBallRateQ8ForPeriod(
+    superlooperBallTriggerInterval(channel)
+  );
+  state.fastRateQ8 = superlooperBallRateQ8ForPeriod(
+    generatedTriggerPulseWidth + SUPERLOOPER_BALL_FAST_LOW_MICROS
+  );
+  state.currentRateQ8 = state.slowRateQ8;
+}
+
+void superlooperBallChannel(
+  uint8_t channel,
+  bool inputState,
+  bool inputEdge,
+  bool &forceStart,
+  bool &outputState,
+  bool &outputChoke,
+  unsigned int &divider,
+  unsigned int control
+) {
+  SuperlooperBallState &state = superlooperBallStates[channel];
+  unsigned long currentMicros = micros();
+  if (!state.prepared) superlooperPrepareBallChannel(channel, 1);
+  state.liveLength = max((unsigned int)1, lengthScaled);
+
+  bool startSignal = inputEdge || forceStart;
+  uint32_t targetRateQ8 = superlooperBallTargetRateQ8(
+    channel,
+    control,
+    currentMicros
+  );
+
+  if (!state.started && startSignal) {
+    state.started = 1;
+    state.phase = 0;
+    state.pulseStartMicros = currentMicros;
+    state.lastUpdateMicros = currentMicros;
+    state.currentRateQ8 = targetRateQ8;
+    divider = 0;
+  }
+  forceStart = 0;
+
+  //At the center the mutation is inaudible: the trigger input passes through
+  //and no phase-generated Ball events are allowed to leak into the output.
+  if (state.strengthQ8 == 0) {
+    outputState = inputState;
+    outputChoke = 1;
+    state.phase = 0;
+    state.currentRateQ8 = state.slowRateQ8;
+    state.lastUpdateMicros = currentMicros;
+    return;
+  }
+
+  if (!state.started) {
+    outputState = 0;
+    return;
+  }
+
+  unsigned long elapsed = currentMicros - state.lastUpdateMicros;
+  unsigned long integrationElapsed = min(elapsed, 100000UL);
+  uint32_t previousRateQ8 = state.currentRateQ8;
+  if (elapsed >= SUPERLOOPER_BALL_CONTROL_SLEW_MICROS) {
+    state.currentRateQ8 = targetRateQ8;
+  }
+  else if (elapsed > 0) {
+    int32_t difference = (int32_t)targetRateQ8 - (int32_t)state.currentRateQ8;
+    int32_t adjustment = (difference * (int32_t)elapsed)
+                       / (int32_t)SUPERLOOPER_BALL_CONTROL_SLEW_MICROS;
+    state.currentRateQ8 = (uint32_t)((int32_t)state.currentRateQ8 + adjustment);
+  }
+
+  uint32_t averageRateQ8 = (previousRateQ8 + state.currentRateQ8) / 2;
+  state.phase += averageRateQ8 * integrationElapsed;
+  if (state.phase >= SUPERLOOPER_BALL_PHASE_ONE) {
+    state.phase %= SUPERLOOPER_BALL_PHASE_ONE;
+    state.pulseStartMicros = currentMicros;
+  }
+  state.lastUpdateMicros = currentMicros;
+  outputState = (currentMicros - state.pulseStartMicros)
+              < generatedTriggerPulseWidth;
+}
+
+void superlooperBall() {
+  if ((modifyLength > 0) && (mode == 3)) {
+    clockState = ((micros() - firstStepTime) < generatedClockPulseWidth);
+  }
+
+  if ((modifyLength1 > 0) && (mode1 == 3)) {
+    superlooperBallChannel(0, trig1In, trig1Edge, forceBounce1,
+      trig1State, trig1Choke, trig1Divide, modifyParam1);
+  }
+  if ((modifyLength2 > 0) && (mode2 == 3)) {
+    superlooperBallChannel(1, trig2In, trig2Edge, forceBounce2,
+      trig2State, trig2Choke, trig2Divide, modifyParam2);
+  }
+  if ((modifyLength3 > 0) && (mode3 == 3)) {
+    superlooperBallChannel(2, trig3In, trig3Edge, forceBounce3,
+      trig3State, trig3Choke, trig3Divide, modifyParam3);
+  }
+  if ((modifyLength4 > 0) && (mode4 == 3)) {
+    superlooperBallChannel(3, trig4In, trig4Edge, forceBounce4,
+      trig4State, trig4Choke, trig4Divide, modifyParam4);
+  }
+}
+
+void superlooperCalculateTriggerStates() {
+  if (modifyLength == 0) {
+    clockState = clockIn;
+    clockChoke = 1;
+  }
+  if (modifyLength1 == 0) {
+    trig1State = trig1In;
+    trig1Choke = 1;
+  }
+  if (modifyLength2 == 0) {
+    trig2State = trig2In;
+    trig2Choke = 1;
+  }
+  if (modifyLength3 == 0) {
+    trig3State = trig3In;
+    trig3Choke = 1;
+  }
+  if (modifyLength4 == 0) {
+    trig4State = trig4In;
+    trig4Choke = 1;
+  }
+
+  if (!modificationActive) return;
+  if (clockEdge && !cycleActive) clockChoke = 1;
+
+  for (uint8_t activeMode = 0; activeMode < 8; ++activeMode) {
+    if ((mode != activeMode) && (mode1 != activeMode) && (mode2 != activeMode)
+        && (mode3 != activeMode) && (mode4 != activeMode)) continue;
+
+    switch (activeMode) {
+      case 0: hold(); break;
+      case 1: burst(); break;
+      case 2: ratchet(); break;
+      case 3: superlooperBall(); break;
+      case 4: rotate(); break;
+      case 5: trigDelay(); break;
+      case 6: breakBeat(); break;
+      case 7: skip(); break;
     }
   }
 }
+
+#ifdef IDUM_SIM
+bool superlooperMutationDebugWindowOpen(uint8_t lane) {
+  return superlooperMutationWindows[lane];
+}
+
+bool superlooperMutationDebugActive(uint8_t lane) {
+  return superlooperMutationLanes[lane].active;
+}
+
+uint8_t superlooperMutationDebugMode(uint8_t lane) {
+  return superlooperMutationLanes[lane].activeMode;
+}
+
+unsigned long superlooperMutationDebugStart(uint8_t lane) {
+  return superlooperMutationLanes[lane].startMicros;
+}
+
+unsigned long superlooperMutationDebugDuration(uint8_t lane) {
+  return superlooperMutationLanes[lane].durationMicros;
+}
+
+bool superlooperBallDebugStarted(uint8_t channel) {
+  return superlooperBallStates[channel].started;
+}
+
+bool superlooperBallDebugSpeeding(uint8_t channel) {
+  return superlooperBallStates[channel].speeding;
+}
+
+uint8_t superlooperBallDebugSampledLength(uint8_t channel) {
+  return superlooperBallStates[channel].sampledLength;
+}
+
+uint32_t superlooperBallDebugPhase(uint8_t channel) {
+  return superlooperBallStates[channel].phase;
+}
+
+uint32_t superlooperBallDebugSlowRateQ8(uint8_t channel) {
+  return superlooperBallStates[channel].slowRateQ8;
+}
+
+uint32_t superlooperBallDebugFastRateQ8(uint8_t channel) {
+  return superlooperBallStates[channel].fastRateQ8;
+}
+
+uint32_t superlooperBallDebugCurrentRateQ8(uint8_t channel) {
+  return superlooperBallStates[channel].currentRateQ8;
+}
+
+unsigned long superlooperBallDebugMutationStart(uint8_t channel) {
+  return superlooperBallStates[channel].mutationStartMicros;
+}
+
+unsigned long superlooperBallDebugMutationDuration(uint8_t channel) {
+  return superlooperBallStates[channel].mutationDurationMicros;
+}
+
+unsigned long superlooperBallDebugPulseStart(uint8_t channel) {
+  return superlooperBallStates[channel].pulseStartMicros;
+}
+#endif
+
+void superlooperPrepareAtomicBallGestures() {
+  const unsigned int unstarted = (unsigned int)-1;
+
+  //Every trigger lane owns its gesture. Same-mode triggers leave this state
+  //alone; a newly triggered mode gets a fresh L-long state from the scheduler.
+  if (startModification1 && (mode1 == 3)) {
+    trig1Divide = unstarted;
+    bounce1Time = 0;
+    superlooperPrepareBallChannel(0, superlooperMutationLanes[1].sampledLength);
+    if (!chokeDisable && !trig1In) trig1Choke = 0;
+  }
+  if (startModification2 && (mode2 == 3)) {
+    trig2Divide = unstarted;
+    bounce2Time = 0;
+    superlooperPrepareBallChannel(1, superlooperMutationLanes[2].sampledLength);
+    if (!chokeDisable && !trig2In) trig2Choke = 0;
+  }
+  if (startModification3 && (mode3 == 3)) {
+    trig3Divide = unstarted;
+    bounce3Time = 0;
+    superlooperPrepareBallChannel(2, superlooperMutationLanes[3].sampledLength);
+    if (!chokeDisable && !trig3In) trig3Choke = 0;
+  }
+  if (startModification4 && (mode4 == 3)) {
+    trig4Divide = unstarted;
+    bounce4Time = 0;
+    superlooperPrepareBallChannel(3, superlooperMutationLanes[4].sampledLength);
+    if (!chokeDisable && !trig4In) trig4Choke = 0;
+  }
+}
+
+#if IDUM_BALL_TIMING_DIAGNOSTIC
+
+void superlooperBallDiagWriteU16(uint8_t address, uint16_t value) {
+  EEPROM.write(address, value & 0xff);
+  EEPROM.write(address + 1, value >> 8);
+}
+
+void superlooperBallDiagWriteU32(uint8_t address, uint32_t value) {
+  for (uint8_t byteIndex = 0; byteIndex < 4; ++byteIndex) {
+    EEPROM.write(address + byteIndex, value >> (byteIndex * 8));
+  }
+}
+
+uint16_t superlooperBallDiagReadU16(uint8_t address) {
+  return EEPROM.read(address) | ((uint16_t)EEPROM.read(address + 1) << 8);
+}
+
+uint32_t superlooperBallDiagReadU32(uint8_t address) {
+  uint32_t value = 0;
+  for (uint8_t byteIndex = 0; byteIndex < 4; ++byteIndex) {
+    value |= (uint32_t)EEPROM.read(address + byteIndex) << (byteIndex * 8);
+  }
+  return value;
+}
+
+void superlooperBallTimingDiagnosticPrintStored() {
+  uint8_t base = SUPERLOOPER_BALL_DIAG_EEPROM_BASE;
+  if (EEPROM.read(base) != SUPERLOOPER_BALL_DIAG_MAGIC) {
+    Serial.println("ball-loop no saved sample; run TR1 Ball for one clock interval");
+    return;
+  }
+
+  Serial.print("ball-loop loops=");
+  Serial.print(superlooperBallDiagReadU16(base + 2));
+  Serial.print(" clock-us=");
+  Serial.print(superlooperBallDiagReadU32(base + 4));
+  Serial.print(" param=");
+  Serial.print(superlooperBallDiagReadU16(base + 8));
+  Serial.print(" sampled-L=");
+  Serial.print(EEPROM.read(base + 10));
+  Serial.print(" live-L=");
+  Serial.print(EEPROM.read(base + 11));
+  Serial.print(" direction=");
+  Serial.print(EEPROM.read(base + 12) ? "slowing" : "speeding");
+  Serial.print(" start-divider=");
+  Serial.println(superlooperBallDiagReadU16(base + 13));
+}
+
+void superlooperBallTimingDiagnosticReset() {
+  superlooperBallDiagClockSeen = 0;
+  superlooperBallDiagIntervalActive = 0;
+  superlooperBallDiagCaptureWritten = 0;
+  superlooperBallDiagLoopCount = 0;
+}
+
+void superlooperBallTimingDiagnosticSetup() {
+  superlooperBallTimingDiagnosticReset();
+  superlooperBallTimingDiagnosticPrintStored();
+  superlooperBallDiagLastPrint = micros();
+}
+
+void superlooperBallTimingDiagnosticSave() {
+  uint8_t base = SUPERLOOPER_BALL_DIAG_EEPROM_BASE;
+  uint16_t loops = min((uint32_t)65535, superlooperBallDiagLoopCount);
+  EEPROM.write(base, 0);
+  EEPROM.write(base + 1, 1);
+  superlooperBallDiagWriteU16(base + 2, loops);
+  superlooperBallDiagWriteU32(base + 4, lastClockInterval);
+  superlooperBallDiagWriteU16(base + 8, superlooperBallDiagParam);
+  EEPROM.write(base + 10, superlooperBallDiagSampledLength);
+  EEPROM.write(base + 11, superlooperBallDiagLiveLength);
+  EEPROM.write(base + 12, superlooperBallDiagExpanding);
+  superlooperBallDiagWriteU16(base + 13, superlooperBallDiagStartDivider);
+  EEPROM.write(base, SUPERLOOPER_BALL_DIAG_MAGIC);
+  superlooperBallDiagCaptureWritten = 1;
+}
+
+void superlooperBallTimingDiagnosticBeginIteration() {
+  if (clockEdge) {
+    if (superlooperBallDiagClockSeen && superlooperBallDiagIntervalActive
+        && !superlooperBallDiagCaptureWritten) {
+      superlooperBallTimingDiagnosticSave();
+    }
+    superlooperBallDiagClockSeen = 1;
+    superlooperBallDiagIntervalActive = 0;
+    superlooperBallDiagLoopCount = 0;
+  }
+
+  if (superlooperBallDiagClockSeen && !superlooperBallDiagCaptureWritten
+      && (superlooperBallDiagLoopCount < 65535)) {
+    superlooperBallDiagLoopCount += 1;
+  }
+}
+
+void superlooperBallTimingDiagnosticObserve() {
+  if (!superlooperBallDiagClockSeen || superlooperBallDiagCaptureWritten
+      || loopEnable || (modifyLength1 == 0) || (mode1 != 3)) return;
+
+  if (!superlooperBallDiagIntervalActive) {
+    superlooperBallDiagParam = modifyParam1;
+    superlooperBallDiagSampledLength = superlooperMutationLanes[1].active
+      ? superlooperMutationLanes[1].sampledLength
+      : originalModifyLength1;
+    superlooperBallDiagLiveLength = lengthScaled;
+    superlooperBallDiagExpanding = unscaledParam1 > 8;
+    superlooperBallDiagStartDivider = trig1Divide;
+  }
+  superlooperBallDiagIntervalActive = 1;
+}
+
+void superlooperBallTimingDiagnosticService() {
+  //After the module is reconnected to USB, repeat the saved line until a new
+  //clock arrives so opening the monitor after boot cannot miss the result.
+  if (superlooperBallDiagClockSeen
+      || ((micros() - superlooperBallDiagLastPrint) < 1000000UL)) return;
+  superlooperBallDiagLastPrint = micros();
+  superlooperBallTimingDiagnosticPrintStored();
+}
+
+#endif
 
 void superlooperCalculateRenderedMutationOutputs() {
   const unsigned int unstarted = (unsigned int)-1;
@@ -937,25 +1714,14 @@ void superlooperCalculateRenderedMutationOutputs() {
   bool savedTrig2Edge = trig2Edge;
   bool savedTrig3Edge = trig3Edge;
   bool savedTrig4Edge = trig4Edge;
-  unsigned int committedLength1 = originalModifyLength1;
-  unsigned int committedLength2 = originalModifyLength2;
-  unsigned int committedLength3 = originalModifyLength3;
-  unsigned int committedLength4 = originalModifyLength4;
 
   if ((mode1 == 3) && (trig1Divide != unstarted)) trig1Edge = 0;
   if ((mode2 == 3) && (trig2Divide != unstarted)) trig2Edge = 0;
   if ((mode3 == 3) && (trig3Divide != unstarted)) trig3Edge = 0;
   if ((mode4 == 3) && (trig4Divide != unstarted)) trig4Edge = 0;
 
-  //The endpoint remains the L sampled into modifyLength at activation, while
-  //the live L control can bend the Ball curve without restarting the gesture.
-  if ((modifyLength1 > 0) && (mode1 == 3)) originalModifyLength1 = lengthScaled;
-  if ((modifyLength2 > 0) && (mode2 == 3)) originalModifyLength2 = lengthScaled;
-  if ((modifyLength3 > 0) && (mode3 == 3)) originalModifyLength3 = lengthScaled;
-  if ((modifyLength4 > 0) && (mode4 == 3)) originalModifyLength4 = lengthScaled;
-
   if (externalSequencerTracking) {
-    calculateTriggerStates();
+    superlooperCalculateTriggerStates();
     superlooperUpdateMutationClockGate();
   }
   else {
@@ -963,7 +1729,7 @@ void superlooperCalculateRenderedMutationOutputs() {
     //while rendering trigger-channel mutations at their raw-clock timing.
     unsigned int savedClockModifyLength = modifyLength;
     modifyLength = 0;
-    calculateTriggerStates();
+    superlooperCalculateTriggerStates();
     modifyLength = savedClockModifyLength;
   }
 
@@ -971,10 +1737,6 @@ void superlooperCalculateRenderedMutationOutputs() {
   trig2Edge = savedTrig2Edge;
   trig3Edge = savedTrig3Edge;
   trig4Edge = savedTrig4Edge;
-  originalModifyLength1 = committedLength1;
-  originalModifyLength2 = committedLength2;
-  originalModifyLength3 = committedLength3;
-  originalModifyLength4 = committedLength4;
 }
 
 void superlooperWriteOutputs(uint8_t triggerMask, bool sequencerClockHigh) {
@@ -1048,6 +1810,9 @@ void runSuperlooperEngine() {
   dTimer.tick();
   superlooperReadInputs();
   edgeDetect();
+#if IDUM_BALL_TIMING_DIAGNOSTIC
+  superlooperBallTimingDiagnosticBeginIteration();
+#endif
   superlooperAdvanceSequencerTiming();
   seedRNGOnFirstClock();
   chooseMode();
@@ -1058,15 +1823,23 @@ void runSuperlooperEngine() {
     renderedMask = superlooperUpdateLoopPlayback();
   }
   else {
-    modifyTest();
+    superlooperMutationScheduler();
     superlooperPrepareAtomicBallGestures();
     superlooperCalculateRenderedMutationOutputs();
     renderedMask = superlooperResolvedMutationTriggerMask();
     superlooperRecordRenderedOutputs(renderedMask);
   }
 
+#if IDUM_BALL_TIMING_DIAGNOSTIC
+  superlooperBallTimingDiagnosticObserve();
+#endif
+
   superlooperHandleNMenu();
   superlooperWriteOutputs(renderedMask, superlooperSequencerClockHigh());
+
+#if IDUM_BALL_TIMING_DIAGNOSTIC
+  superlooperBallTimingDiagnosticService();
+#endif
 
   if (printEnable && clockEdge) {
   }
@@ -1101,6 +1874,13 @@ void resetSuperlooperEngine() {
   superlooperExternalTrackingOld = externalSequencerTracking;
   superlooperLoopRequestPending = 0;
   superlooperLoopRequestedState = 0;
+  superlooperResetMutationScheduler();
+  for (uint8_t channel = 0; channel < 4; ++channel) {
+    superlooperBallStates[channel] = SuperlooperBallState {};
+  }
+#if IDUM_BALL_TIMING_DIAGNOSTIC
+  superlooperBallTimingDiagnosticReset();
+#endif
 }
 
 #endif

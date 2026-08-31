@@ -212,20 +212,23 @@ intentionally a fresh boundary rather than a synchronized handoff; LOOP
 transitions inside the alternate runner carry the musical semantics.
 
 The selected Superlooper runner owns a separate looper coordinator rather than
-branching inside the stock looper. Raw CLOCK IN still advances the stock
-mutation state machine. After stock trigger rendering and choke resolution,
-Superlooper records the four resulting states at 32 cells per raw clock.
-LOOP freezes and directly plays this tape, bypassing mutation generation.
+branching inside the stock looper. Raw CLOCK IN evaluates Chance and opens an
+eligibility window until the next raw clock. An eligible trigger launches its
+selected mode immediately for `L * N` raw clocks; same-mode triggers do not
+renew that lifetime, while an eligible trigger after a Mode change preempts it.
+After trigger rendering and choke resolution, Superlooper records the four
+resulting states at 32 cells per raw clock. LOOP freezes and directly plays this
+tape, bypassing mutation generation.
 
-N defines raw clocks per sequencer stage and divides CLOCK OUT without changing
-mutation timing. The rolling tape retains eight complete stages plus the
-partial stage being recorded. Playback ends at the newest complete stage and
-Length chooses how many preceding stages are included. Param and Length use
-movement pickup across LOOP boundaries, loop Param begins at 1:1, and its
-continuous curve reaches 1/8x and 8x. The first loop span uses the current
-physical Length position; later loop entries recall the preceding span until
-Length moves. Chance is live during recording and is already baked into the
-captured output.
+N defines raw clocks per sequencer stage, divides CLOCK OUT, and scales a
+mutation's complete L-stage duration. The rolling tape retains eight complete
+stages plus the partial stage being recorded. Playback ends at the newest
+complete stage and Length chooses how many preceding stages are included. Param
+and Length use movement pickup across LOOP boundaries, loop Param begins at
+1:1, and its continuous curve reaches 1/8x and 8x. The first loop span uses the
+current physical Length position; later loop entries recall the preceding span
+until Length moves. Chance is live during recording and is already baked into
+the captured output.
 
 External cycle maintenance tries to keep an attached sequencer aligned when
 IDUM changes clock behavior. This code lives mostly in `a91_followUtils.ino`

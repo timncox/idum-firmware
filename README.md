@@ -100,6 +100,33 @@ deliberately restore v0.99's unbounded behavior for a custom build:
 make build FIRMWARE_DEFINES=-DIDUM_ENABLE_CLOCK_STOP_TIMEOUT=0
 ```
 
+### Ball loop-speed diagnostic
+
+The optional Ball timing image measures how many SuperLooper engine iterations
+fit in one real CLOCK interval while TR1 Ball is active. It does not change the
+production image or print during the measured interval. The first sample after
+boot is saved to EEPROM so it survives the USB-disconnect test workflow.
+
+```sh
+make ball-timing-diagnostic-test
+make ball-timing-diagnostic-build
+make ball-timing-diagnostic-upload PORT=/dev/cu.usbmodem101
+```
+
+After flashing, disconnect USB, run a TR1 Ball mutation for at least one full
+clock interval, then reconnect USB. At 115200 baud the saved line repeats once
+per second until the next clock arrives. It reports engine loops, clock period,
+PARAM, sampled and live L, direction, and the opening divider.
+
+### Trigger-owned SuperLooper mutations
+
+SuperLooper uses clock-opened Chance windows and trigger-owned mutation
+lifetimes. Off-grid triggers inside an open window receive a complete L stage
+span (`L * N` raw clocks). Same-mode triggers do not renew that lifetime, while
+an eligible trigger with a newly selected Mode intentionally preempts it. The
+full state contract is in
+[`docs/SUPERLOOPER_MUTATION_SCHEDULER.md`](docs/SUPERLOOPER_MUTATION_SCHEDULER.md).
+
 ## Host Simulator
 
 The `sim/` directory contains a small desktop harness that compiles the firmware as ordinary C++ and provides fake Arduino functions for pins, analog reads, EEPROM, time, and random numbers. It is not an ATmega4809 emulator, but it lets us exercise the firmware's normal `setup()` and `loop()` paths and inspect output pin behavior before flashing hardware.
@@ -197,18 +224,21 @@ runner is already active.
 CYCLE is never used directly by either sequencing engine. In the classic
 runner, setup-menu position 0 enables or disables the legacy external-sequencer
 cycle/position maintenance. Superlooper always owns its N-divided CLOCK OUT;
-position 0 controls only its loop-position jumps and exit catch-up. Catch-up
-pulses use the fast stock path by default. The classic runner otherwise retains
-the stock clock ordering and timing algorithms.
+position 0 enables its recorded external-transport lane, loop-position jumps,
+and exit catch-up. Jump and catch-up bursts use a fixed fast pulse cadence that
+does not vary with N. With tracking disabled, CLOCK OUT remains a plain N-divided
+clock. The classic runner otherwise retains the stock clock ordering and timing
+algorithms.
 
 ### Superlooper build
 
 `make superlooper-build` supplies an independent rendered-output looper while
-leaving the stock runner unchanged. Raw CLOCK IN still drives the v0.99
-mutation engine at its original rate. Superlooper taps the final four trigger
-states after mutation and choke resolution into a rolling tape with 32
-cells per raw clock. LOOP bypasses mutation rendering and plays that tape
-directly, so the loop repeats what the module actually emitted.
+leaving the stock runner unchanged. Superlooper taps the final four trigger
+states after mutation and choke resolution into a rolling tape with 32 cells
+per raw clock. LOOP bypasses mutation rendering and plays that tape directly,
+so the loop repeats what the module actually emitted. LOOP entry and exit are
+committed on the next raw clock edge, keeping the tape and external sequencer
+transport aligned.
 
 One sequencer stage contains `N` raw clocks. Six contiguous regions of the
 calibrated Length slider select `N = 1, 2, 3, 4, 6, 8` while the setup menu is
@@ -217,6 +247,14 @@ Outside LOOP, CLOCK OUT advances once per N raw clocks. Superlooper always keeps
 the preceding eight complete N-clock stages. Length chooses the backward span:
 `1` repeats only the newest complete stage, `4` plays the last four stages
 oldest-to-newest, and `8` plays the complete captured window.
+
+When external-sequencer tracking is enabled, Superlooper records sequencer
+advances alongside the rendered trigger tape. Playback replays those advances
+at their recorded tape positions, scaled by the active loop speed. Mutations
+span `L * N` raw clocks, so their transport catch-up is computed in complete
+Superlooper stages: for example, `N=2, L=8` advances an external sequencer eight
+times over sixteen raw clocks and returns an eight-step sequence to its starting
+stage.
 
 Param and Length have separate mutation and loop values. At each LOOP boundary
 the newly active values remain latched until that physical control moves beyond
@@ -232,15 +270,29 @@ Chance deliberately remains the live v0.99 probability control while recording.
 Its decisions are already present in the rendered tape, so Chance is not
 reapplied during playback. New loop-density semantics remain deferred.
 
-Skip cannot add or remove clocks from Superlooper's dedicated transport; it
-still follows the stock trigger-channel pass-through behavior. The other stock
-mutation modes run at the raw CLOCK IN rate before their rendered trigger output
-is captured.
+Each raw CLOCK IN edge evaluates Chance and opens or closes an eligibility
+window until the next clock edge. A trigger inside an open window begins its
+selected mode immediately for a sampled `L` stages (`L * N` raw clocks), even
+when the trigger is off-grid. A same-mode trigger during that mutation does not
+restart its lifetime; an eligible trigger after a Mode change preempts it with a
+fresh L-stage mutation. Mode changes without triggers do nothing. PARAM remains
+live, and Ball additionally allows live L movement to bend the active curve
+without changing its sampled endpoint.
+
+SuperLooper Ball uses a time-domain curve while the classic Ball implementation
+remains untouched. Center PARAM is dry pass-through. At either side, the curve
+moves continuously between the most recent plausible trigger period and a fast
+14 ms period that preserves a real low gap instead of collapsing into a solid
+gate. Skip cannot add or remove clocks from Superlooper's dedicated transport;
+it retains the stock trigger-channel pass-through behavior.
 
 The Superlooper test battery covers fresh CYCLE transitions, control pickup,
-newest-stage anchoring, N division without mutation-timing changes, sub-clock
-capture, crossed-onset playback, smooth speed endpoints, tape-head resumption,
-Skip transport isolation, and all trigger-producing mutation modes.
+newest-stage anchoring, N division, `L * N` mutation lifetimes, trigger-owned
+launch and mode preemption, sub-clock capture, crossed-onset playback, smooth
+speed endpoints, tape-head resumption, recorded external transport, Skip
+transport isolation, and all trigger-producing mutation modes. It also compares
+an exact deterministic fingerprint of the classic runner so Superlooper changes
+cannot silently alter the stock timing path.
 
 ## Boot Controls
 

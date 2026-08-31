@@ -89,8 +89,11 @@ Superlooper owns its input-control routing, N-divided sequencer transport,
 rendered tape, and looper coordination in
 `firmware/engines/superlooper/c10_SuperlooperEngine.ino`. It reuses
 calibrated ADC scaling and the stock mutation renderers, but does not add
-conditionals to the classic looper. Raw CLOCK IN remains the mutation clock.
-Only CLOCK OUT and the duration of a captured loop stage use N.
+conditionals to the classic looper. Raw CLOCK IN evaluates Chance and opens an
+eligibility window until the next clock; an eligible CLOCK/TRIGGER lane edge
+launches its selected mode for `L * N` raw clocks. Same-mode trigger edges do
+not renew that lifetime, while an eligible trigger after a Mode change preempts
+it. The classic runner retains its stock clock-owned scheduler.
 
 The tape stores four 32-bit channel words for each raw clock: one bit per
 sub-clock cell. Nine maximum-size stages (72 raw clocks, 1152 bytes) allow the
@@ -101,16 +104,16 @@ at the newest complete captured stage; Length selects the last L stages.
 Param and Length use separate mutation/loop banks with movement pickup at LOOP
 transitions. Loop Param resets to 1:1 on entry and maps smoothly from 1/8x to
 8x. The first loop Length comes from the physical slider; subsequent entries
-recall the prior loop span. Chance remains live only while the stock mutation
-engine is producing material for the tape.
+recall the prior loop span. Chance remains live only while Superlooper's
+mutation scheduler is producing material for the tape.
 Length edits inside LOOP take effect at a stage boundary. When LOOP exits, the
 write head advances by the raw clocks elapsed during frozen playback and clears
 that span before recording resumes.
 
 Six contiguous calibrated Length regions edit N in the setup menu, mapping to
 `1, 2, 3, 4, 6, 8`. Superlooper stores the selection in EEPROM bytes 6
-and 7. Skip cannot manipulate the dedicated N transport; menu position 0 only
-enables captured-position jumps and exit catch-up.
+and 7. Skip cannot manipulate the dedicated N transport; menu position 0
+enables recorded transport events, captured-position jumps, and exit catch-up.
 
 ## Verification Contract
 
