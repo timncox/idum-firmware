@@ -22,9 +22,13 @@ const uint8_t superlooperClocksPerStepOptions[SUPERLOOPER_N_OPTION_COUNT] =
 const uint8_t superlooperLengthPositionToNOption[8] = { 0, 1, 2, 3, 4, 4, 5, 5 };
 const uint8_t SUPERLOOPER_N_EEPROM_MARKER = 0x4e;
 const unsigned int superlooperPickupThreshold = 12;
-//Ignore a little ADC noise at the bottom of Chance. Keep the curve above this
-//floor unchanged and honor a larger shared threshold in custom builds.
-const unsigned int superlooperChanceDeadZone = 10;
+//Match the stock v0.99 bottom dead zone. Higher shared thresholds in custom
+//builds still take precedence; the cubic curve starts above this floor.
+const unsigned int superlooperChanceDeadZone = 15;
+const unsigned int superlooperChanceFullScale = 1000;
+unsigned int superlooperChanceDisplayReference = 1025;
+unsigned long superlooperChanceDisplayTime = 0;
+uint8_t superlooperChanceDisplayLed = 255; //255: normal display owns the ring.
 //0: smooth forward, 1: stepped forward, 2: smooth bidirectional,
 //3: stepped bidirectional. Separate EEPROM bytes preserve existing settings.
 uint8_t superlooperPlaybackOption = 0;
@@ -1339,17 +1343,58 @@ void superlooperLaunchTriggerMutation(
 }
 
 unsigned int superlooperProbabilityRoll(unsigned int penalty) {
-  return min(random(probabilityUpperThreshold)
-             + (penalty * probabilityLengthPenalty),
-             probabilityUpperThreshold);
+  //Use 16-bit probability resolution so the low end of the cubic curve does
+  //not collapse into 0.1% steps. Preserve the existing length-penalty fraction.
+  uint32_t denominator = max((unsigned int)1, probabilityUpperThreshold);
+  uint32_t penaltyAmount = min((uint32_t)penalty * probabilityLengthPenalty, denominator);
+  uint32_t roll = random(65536UL) + (penaltyAmount * 65536UL) / denominator;
+  return min(roll, (uint32_t)65535);
 }
 
 bool superlooperChanceIsOff() {
   return probRead <= max(superlooperChanceDeadZone, probabilityLowerThreshold);
 }
 
+//Called by the display timer, so the normal ring scan cannot fight the meter.
+bool superlooperDisplayChance() {
+  if (!alternateEngineActive) return false;
+  if (menuMode || loopEnable || superlooperChanceDisplayReference == 1025) {
+    superlooperChanceDisplayReference = probRead;
+    superlooperChanceDisplayLed = 255;
+  }
+  else if (abs((int)probRead - (int)superlooperChanceDisplayReference)
+      > superlooperPickupThreshold) {
+    superlooperChanceDisplayReference = probRead;
+    superlooperChanceDisplayLed = 0;
+    superlooperChanceDisplayTime = micros();
+  }
+  if ((micros() - superlooperChanceDisplayTime) >= 1000000UL)
+    superlooperChanceDisplayLed = 255;
+  if (superlooperChanceDisplayLed == 255) return false;
+  //Track the real curve while visible, but only deliberate movement extends
+  //the timeout. Noise around the floor must not keep reopening the meter.
+  //Ceil into seven equal probability bands; zero has its own LED.
+  superlooperChanceDisplayLed = (superlooperChanceThreshold() * 7 + 65535UL) >> 16;
+  writeModeLed(superlooperChanceDisplayLed);
+  modeCounterOld = 8; //Force the normal display to restore its LED afterward.
+  return true;
+}
+
+uint32_t superlooperChanceThreshold() {
+  unsigned int floor = max(superlooperChanceDeadZone, probabilityLowerThreshold);
+  if (probRead <= floor || floor >= superlooperChanceFullScale) return 0;
+  //Keep a top saturation zone so a high CV gate need not hit the last ADC
+  //count. Full scale admits every roll, including a capped length penalty.
+  if (probRead >= superlooperChanceFullScale) return 65536UL;
+  //Normalize the live range, then cube it in Q10 without floating point or
+  //64-bit math. The largest cube is 2^30 and fits in 32 bits.
+  uint32_t normalized = ((uint32_t)(probRead - floor) * 1024)
+    / (superlooperChanceFullScale - floor);
+  return max(1UL, (normalized * normalized * normalized) >> 14);
+}
+
 bool superlooperWindowFromRoll(unsigned int roll) {
-  return (roll < probRead) && !superlooperChanceIsOff() && !menuMode;
+  return !menuMode && (roll < superlooperChanceThreshold());
 }
 
 void superlooperOpenMutationWindows() {
@@ -2137,6 +2182,8 @@ void runSuperlooperEngine() {
 }
 
 void resetSuperlooperEngine() {
+  superlooperChanceDisplayReference = 1025;
+  superlooperChanceDisplayLed = 255;
   loopEnable = 0;
   modifyLength = modifyLength1 = modifyLength2 = modifyLength3 = modifyLength4 = 0;
   modificationActive = 0;

@@ -8,10 +8,13 @@ selectable alternate engine. The physical CYCLE switch chooses between them at
 runtime. Superlooper is the alternate engine; the shared firmware is based on
 the official IDUM v0.99 Arduino source.
 
-The current test build is **v1.0.5-reverse-onsets-test**, with quantized and
+The current test build is **v1.0.8-chance-meter-noise-test**, with quantized and
 bidirectional loop speed, reverse trigger timing, separate loop/mutation control
-memories, and the Chance bottom dead zone. See the
-[playback test notes](docs/PLAYBACK_TEST_BUILD.md) for validation and hardware checks.
+memories, and a cubic Chance curve with the stock-sized bottom dead zone and a
+temporary probability meter. The meter opens after movement of more than 12
+ADC counts, so small fluctuations around the floor do not continually restart
+its timeout. See the [Chance meter test notes](docs/CHANCE_METER_TEST_BUILD.md)
+for validation and hardware checks.
 
 The repository makes the firmware hackable without the Arduino GUI: it provides
 separated engine source, repeatable command-line builds, a host simulator, and
@@ -70,9 +73,9 @@ To build and upload the current test version with its own output directory:
 
 ```sh
 make test-superlooper
-make build FIRMWARE_VERSION=1.0.5-reverse-onsets-test BUILD_PATH=build/idum-superlooper-reverse-onsets-test
+make build FIRMWARE_VERSION=1.0.8-chance-meter-noise-test BUILD_PATH=build/idum-superlooper-chance-meter-noise-test
 make board-list
-make upload BUILD_PATH=build/idum-superlooper-reverse-onsets-test PORT=<detected-port>
+make upload BUILD_PATH=build/idum-superlooper-chance-meter-noise-test PORT=<detected-port>
 ```
 
 Use the Nano Every port reported by `make board-list`. Output version names are
@@ -329,13 +332,36 @@ clock bursts to reach preceding steps on an eight-step external sequencer.
 Moved Length changes take effect at a loop-stage boundary; PARAM speed changes
 take effect immediately.
 
-Chance remains a live probability control while recording. Superlooper blocks
-new mutations at readings 0-10 to tolerate noise at the slider's bottom, while
-preserving the probability curve above that dead zone. Moving down into the
-dead zone immediately closes any open eligibility windows; existing mutations
-finish their sampled duration. Its decisions are already present in the
-rendered tape, so Chance is not reapplied during playback. New loop-density
-semantics remain deferred.
+Chance remains live while recording and follows a cubic curve. Readings 0-15
+(about 1.5% of the ADC range, matching stock v0.99) block new mutations. Above
+15, the curve rises gradually toward guaranteed eligibility at 1000-1024. Approximate base probabilities at
+quarter, half, and three-quarter input range are 1.45%, 12.8%, and 44.5%. The curve
+uses 16-bit probability resolution to retain very small probabilities near the
+bottom. The existing length penalty still reduces eligibility below the top.
+
+A CV gate that drives the combined Chance reading to 1000 or above forces the
+next clock's eligibility window open, even with an active length penalty.
+Dropping to 15 or below closes open windows immediately. Existing mutations
+finish their sampled duration. Firmware sees one combined slider/CV reading,
+so the floor is not an independent physical-fader mute. These probabilities
+apply per raw clock: faster clocks and longer mutations can sound denser.
+
+Chance decisions are already present in the recorded tape and are not reapplied
+during LOOP playback.
+
+Changing Chance temporarily turns the mode ring into a probability meter:
+leftmost LED (position 0) means off, and positions 1-7 divide the curved base
+probability into seven equal bands. While the meter is visible, position 1
+appears immediately above the floor. This shows probability before the length
+penalty, not a mutation firing.
+The normal display returns one second after the last input movement exceeding
+12 ADC counts. While visible, the meter follows the current reading, including
+one-count crossings of the floor; these crossings do not restart the timer.
+Both slider and CV drive the meter, so substantial ongoing CV movement can keep
+it visible. Small changes accumulate against the last movement reference, so a
+slow sweep still opens it. Setup and LOOP position take priority. See the
+[Chance meter test notes](docs/CHANCE_METER_TEST_BUILD.md) for the mapping and
+patched-gate test procedure.
 
 Each raw CLOCK IN edge evaluates Chance and opens or closes an eligibility
 window until the next clock edge. A trigger inside an open window begins its

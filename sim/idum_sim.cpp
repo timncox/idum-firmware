@@ -51,7 +51,12 @@ void writeModeLed(unsigned int ledIndex);
 void displayFirmwareBootSignature();
 #if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
 void superlooperReadInputs();
+bool superlooperDisplayChance();
+void handleDisplay();
+extern uint8_t superlooperChanceDisplayLed;
 bool superlooperWindowFromRoll(unsigned int roll);
+uint32_t superlooperChanceThreshold();
+unsigned int superlooperProbabilityRoll(unsigned int penalty);
 void superlooperArmControlPickup(bool enteringLoop);
 void superlooperDetermineLooperStatus();
 void superlooperSetNOption(uint8_t option);
@@ -233,6 +238,7 @@ extern unsigned int originalModifyLength4;
 extern unsigned int paramHistory[5][8][4];
 extern unsigned int paramResolution;
 extern unsigned int probRead;
+extern unsigned int probabilityLowerThreshold;
 extern unsigned int probabilityModifier;
 extern unsigned int ratchetAmount;
 extern unsigned int ratchetAmount1;
@@ -1728,6 +1734,7 @@ int superlooperChanceDeadZoneScenario(bool useSplitMode) {
   unsigned long nextClock = micros() + 100000;
   for (int i = 0; i < 3; ++i) transportIOClock(nextClock);
   configureAlwaysModify(0, 1024, 0);
+  setLogicalAnalog(20, 1000); //High CV gate reaches the guaranteed-on zone.
   transportIOClock(nextClock);
   bool opened = true;
   for (uint8_t lane = 0; lane < 5; ++lane) {
@@ -1736,7 +1743,7 @@ int superlooperChanceDeadZoneScenario(bool useSplitMode) {
 
   //Drop Chance between clocks. New hits must not use the previously open
   //window, while the clock mutation already in progress keeps its lifetime.
-  setLogicalAnalog(20, 10);
+  setLogicalAnalog(20, 15);
   pulseTriggerInputs();
   bool closedImmediately = true;
   bool noTriggerMutation = true;
@@ -1747,7 +1754,7 @@ int superlooperChanceDeadZoneScenario(bool useSplitMode) {
   const bool existingMutationKept = superlooperMutationDebugActive(0);
 
   //Moving back up requires the next clock to open a fresh window.
-  setLogicalAnalog(20, 1024);
+  setLogicalAnalog(20, 1000);
   pulseTriggerInputs();
   const bool waitedForClock = !superlooperMutationDebugActive(1);
   runUntil(nextClock);
@@ -1757,30 +1764,131 @@ int superlooperChanceDeadZoneScenario(bool useSplitMode) {
     resumed = resumed && superlooperMutationDebugActive(lane);
   }
 
-  //Exhaust all possible rolled values, including a capped length penalty.
-  bool bottomBlocked = true;
-  for (unsigned int reading = 0; reading <= 10; ++reading) {
+  //Check every input reading against an independent floating-point cubic,
+  //including the floor and full-scale endpoint. Integer Q10 rounding stays
+  //within 0.3 percentage points, without coarsening the tiny probabilities.
+  bool bottomBlocked = true, curve = true, monotonic = true;
+  uint32_t previous = 0;
+  for (unsigned int reading = 0; reading <= 1024; ++reading) {
     probRead = reading;
-    for (unsigned int roll = 0; roll <= 1000; ++roll) {
-      bottomBlocked = bottomBlocked && !superlooperWindowFromRoll(roll);
+    uint32_t threshold = superlooperChanceThreshold();
+    if (reading <= 15) bottomBlocked &= threshold == 0 && !superlooperWindowFromRoll(0);
+    double x = reading <= 15 ? 0 : std::min(1.0, double(reading - 15) / 985);
+    double expected = x*x*x*65536;
+    curve &= std::abs(double(threshold) - expected) < 200;
+    monotonic &= threshold >= previous && threshold <= 65536;
+    previous = threshold;
+  }
+  probRead = 16;
+  const bool aboveThresholdWorks = superlooperWindowFromRoll(0) && !superlooperWindowFromRoll(1);
+  probRead = 512;
+  const uint32_t midpoint = superlooperChanceThreshold();
+  bool exactRolls = true;
+  for (unsigned long roll = 0; roll < 65536; ++roll)
+    exactRolls &= superlooperWindowFromRoll(roll) == (roll < midpoint);
+  bool topAlways = true, penaltyPreserved = true;
+  for (unsigned reading : {1000u, 1024u}) {
+    probRead = reading;
+    topAlways &= superlooperWindowFromRoll(65535);
+    for (unsigned penalty = 0; penalty <= 7; ++penalty) {
+      randomSeed(1234);
+      unsigned long base = random(65536L);
+      randomSeed(1234);
+      unsigned rolled = superlooperProbabilityRoll(penalty);
+      unsigned long expected = std::min(65535UL, base + (penalty * 90UL * 65536UL) / 1000);
+      penaltyPreserved &= rolled == expected;
+      topAlways &= superlooperWindowFromRoll(rolled);
     }
   }
-  probRead = 11;
-  const bool aboveThresholdWorks = superlooperWindowFromRoll(0)
-    && superlooperWindowFromRoll(10) && !superlooperWindowFromRoll(11);
-  probRead = 512;
-  const bool midpointUnchanged = superlooperWindowFromRoll(511)
-    && !superlooperWindowFromRoll(512);
+  //Keep custom lower thresholds safe, including a completely closed range.
+  probabilityLowerThreshold = 100;
+  probRead = 100;
+  bool customFloor = !superlooperWindowFromRoll(0);
+  probRead = 101;
+  customFloor &= superlooperWindowFromRoll(0);
+  probabilityLowerThreshold = 1024;
   probRead = 1024;
-  const bool topUnchanged = superlooperWindowFromRoll(1000);
+  customFloor &= !superlooperWindowFromRoll(0);
+  probabilityLowerThreshold = 0;
   return reportFirmwareRegression("superlooper-chance-dead-zone",
     opened && closedImmediately && noTriggerMutation && existingMutationKept
       && waitedForClock && resumed && bottomBlocked && aboveThresholdWorks
-      && midpointUnchanged && topUnchanged,
+      && curve && monotonic && exactRolls && topAlways && customFloor && penaltyPreserved,
     "split=" + std::to_string(useSplitMode) + ", bottom/immediate/above="
       + std::to_string(bottomBlocked) + "/" + std::to_string(closedImmediately)
-      + "/" + std::to_string(aboveThresholdWorks) + ", wait/resume="
-      + std::to_string(waitedForClock) + "/" + std::to_string(resumed));
+      + "/" + std::to_string(aboveThresholdWorks) + ", curve/monotonic/rolls/top/custom/penalty="
+      + std::to_string(curve) + "/" + std::to_string(monotonic) + "/"
+      + std::to_string(exactRolls) + "/" + std::to_string(topAlways) + "/" + std::to_string(customFloor)
+      + "/" + std::to_string(penaltyPreserved)
+      + ", midpoint=" + std::to_string(midpoint) + "/65536");
+}
+
+int superlooperChanceMeterScenario() {
+  prepareSuperlooperTransportIO(0);
+  runFor(1100000);
+  const bool initiallyHidden = superlooperChanceDisplayLed == 255;
+  bool bands = true;
+  //Representative input values in every probability band, after the cubic.
+  const unsigned readings[] = {16, 600, 700, 780, 840, 900, 960, 1000, 15};
+  const uint8_t expected[] = {1, 2, 3, 4, 5, 6, 7, 7, 0};
+  for (unsigned i = 0; i < 9; ++i) {
+    setLogicalAnalog(20, readings[i]);
+    runFor(10000);
+    bands &= superlooperChanceDisplayLed == expected[i];
+    //Check the display timer's actual mux output against the LED driver.
+    const auto actualPins = digitalPins;
+    writeModeLed(expected[i]);
+    for (unsigned pin : {2u, 3u, 4u}) bands &= actualPins[pin] == digitalPins[pin];
+  }
+  //While visible, one-count crossings still show Chance becoming live/off.
+  setLogicalAnalog(20, 16);
+  runFor(10000);
+  bool crossing = superlooperChanceDisplayLed == 1;
+  setLogicalAnalog(20, 15);
+  runFor(10000);
+  crossing &= superlooperChanceDisplayLed == 0;
+  runFor(1100000);
+  const bool expired = superlooperChanceDisplayLed == 255;
+  //Sustained jitter that used to refresh the timer must settle AND stay
+  //hidden, including noise repeatedly crossing the actual Chance floor.
+  bool noiseIgnored = true;
+  for (unsigned center : {15u, 600u}) {
+    setLogicalAnalog(20, center);
+    runFor(10000);
+    for (unsigned sample = 0; sample < 240; ++sample) {
+      setLogicalAnalog(20, sample % 2 ? center + 6 : center - 6);
+      runFor(10000);
+      if (sample >= 110) noiseIgnored &= superlooperChanceDisplayLed == 255;
+    }
+    //A slow deliberate sweep accumulates against the reference and reopens.
+    for (unsigned offset = 1; offset <= 16; ++offset) {
+      setLogicalAnalog(20, center + offset);
+      runFor(10000);
+    }
+    noiseIgnored &= superlooperChanceDisplayLed != 255;
+  }
+  setLogicalAnalog(20, 1000);
+  runFor(10000);
+  bool priority = superlooperChanceDisplayLed == 7;
+  //Exercise display ownership directly, without changing transport state.
+  loopEnable = true;
+  priority &= !superlooperDisplayChance() && superlooperChanceDisplayLed == 255;
+  loopEnable = false;
+  probRead = 15;
+  menuMode = true;
+  priority &= !superlooperDisplayChance();
+  menuMode = false;
+  priority &= !superlooperDisplayChance(); //No stale overlay after setup.
+  probRead = 1000;
+  priority &= superlooperDisplayChance();
+  alternateEngineActive = false;
+  priority &= !superlooperDisplayChance();
+  return reportFirmwareRegression("superlooper-chance-meter",
+    initiallyHidden && bands && crossing && expired && noiseIgnored && priority,
+    "initial/bands/crossing/timeout/noise/priority=" + std::to_string(initiallyHidden)
+      + "/" + std::to_string(bands) + "/" + std::to_string(crossing)
+      + "/" + std::to_string(expired) + "/" + std::to_string(noiseIgnored)
+      + "/" + std::to_string(priority));
 }
 
 int superlooperClockStopIOScenario() {
@@ -2807,6 +2915,7 @@ int allSuperlooperRegressionsScenario() {
     "regression-superlooper-clock-stop-io",
     "regression-superlooper-chance-dead-zone",
     "regression-superlooper-chance-dead-zone-split",
+    "regression-superlooper-chance-meter",
     "regression-superlooper-playback-recall-0",
     "regression-superlooper-playback-recall-1",
     "regression-superlooper-playback-recall-2",
@@ -2911,6 +3020,7 @@ int runScenario(const std::string& name) {
   if (name == "regression-superlooper-loop-exit-io") return superlooperLoopExitIOScenario(100);
   if (name == "regression-superlooper-loop-exit-io-slow") return superlooperLoopExitIOScenario(1000);
   if (name == "regression-superlooper-clock-stop-io") return superlooperClockStopIOScenario();
+  if (name == "regression-superlooper-chance-meter") return superlooperChanceMeterScenario();
   if (name == "regression-superlooper-chance-dead-zone") return superlooperChanceDeadZoneScenario(false);
   if (name == "regression-superlooper-chance-dead-zone-split") return superlooperChanceDeadZoneScenario(true);
   for (int option = 0; option < 4; ++option) {

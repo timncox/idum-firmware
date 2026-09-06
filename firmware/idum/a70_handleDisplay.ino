@@ -8,6 +8,10 @@ void handleDisplay() {
 
   loopButtonDisplay();  //handles the looper button which has a couple of under the hood options
 
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
+  if (superlooperDisplayChance()) return;
+#endif
+
   calculateDisplayCounters();  //counts every time we run this program for different brightness levels
 
   calculateActiveLED();  //set the active LED

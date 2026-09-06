@@ -1,7 +1,10 @@
 # Superlooper playback test build
 
 Image: `build/release/alt-dum-superlooper-v1.0.5-reverse-onsets-test.hex`.
-Includes the transport fixes and the 0-10 Chance dead zone.
+This historical playback image includes the transport fixes and the original
+0-10 Chance dead zone. The current Chance floor/curve is documented in
+[CHANCE_METER_TEST_BUILD.md](CHANCE_METER_TEST_BUILD.md). Build commands below
+compile the checked-out source, not an earlier firmware revision.
 
 ## Settings
 
