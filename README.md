@@ -5,8 +5,13 @@ Eurorack module. It is not the official Mystic Circuits firmware.**
 
 Alt-DUM keeps a stock-derived classic runner and pairs it with one independently
 selectable alternate engine. The physical CYCLE switch chooses between them at
-runtime. Alt-DUM v1.0.0 ships with Superlooper as that alternate engine and is
-built from the official IDUM v0.99 Arduino source.
+runtime. Superlooper is the alternate engine; the shared firmware is based on
+the official IDUM v0.99 Arduino source.
+
+The current test build is **v1.0.5-reverse-onsets-test**, with quantized and
+bidirectional loop speed, reverse trigger timing, separate loop/mutation control
+memories, and the Chance bottom dead zone. See the
+[playback test notes](docs/PLAYBACK_TEST_BUILD.md) for validation and hardware checks.
 
 The repository makes the firmware hackable without the Arduino GUI: it provides
 separated engine source, repeatable command-line builds, a host simulator, and
@@ -53,13 +58,26 @@ Override the board target like this:
 make build FQBN=arduino:avr:nano
 ```
 
-`make build` performs the complete v1.0.0 production build:
+`make build` compiles the current source using the default v1.0.0 output name:
 
 1. Copy the stock-derived/shared sketch into
    `build/staged/superlooper/idum/`.
 2. Add only the selected source from `firmware/engines/superlooper/`.
 3. Compile the staged sketch for the Arduino Nano Every / ATmega4809.
 4. Export `build/release/alt-dum-superlooper-v1.0.0.hex`.
+
+To build and upload the current test version with its own output directory:
+
+```sh
+make test-superlooper
+make build FIRMWARE_VERSION=1.0.5-reverse-onsets-test BUILD_PATH=build/idum-superlooper-reverse-onsets-test
+make board-list
+make upload BUILD_PATH=build/idum-superlooper-reverse-onsets-test PORT=<detected-port>
+```
+
+Use the Nano Every port reported by `make board-list`. Output version names are
+labels, not source checkouts: rebuilding an older filename from current source
+does not reproduce the older firmware.
 
 The explicit Superlooper target is:
 
@@ -226,9 +244,10 @@ runner, setup-menu position 0 enables or disables the legacy external-sequencer
 cycle/position maintenance. Superlooper always owns its N-divided CLOCK OUT;
 position 0 enables its recorded external-transport lane, loop-position jumps,
 and exit catch-up. Jump and catch-up bursts use a fixed fast pulse cadence that
-does not vary with N. With tracking disabled, CLOCK OUT remains a plain N-divided
-clock. The classic runner otherwise retains the stock clock ordering and timing
-algorithms.
+does not vary with N. With tracking disabled, Superlooper emits plain N-divided
+clocking outside LOOP and clock pulses at loop-stage boundaries during playback;
+it does not restore the external sequencer's absolute position. The classic
+runner otherwise retains its existing clock ordering and timing algorithms.
 
 ### Superlooper build
 
@@ -245,8 +264,9 @@ calibrated Length slider select `N = 1, 2, 3, 4, 6, 8` while the setup menu is
 open; the selected ring LED is shown for one second and the value is saved in EEPROM.
 Outside LOOP, CLOCK OUT advances once per N raw clocks. Superlooper always keeps
 the preceding eight complete N-clock stages. Length chooses the backward span:
-`1` repeats only the newest complete stage, `4` plays the last four stages
-oldest-to-newest, and `8` plays the complete captured window.
+`1` repeats only the newest complete stage, `4` selects the last four stages,
+and `8` selects the complete captured window. Forward playback reads the
+selected span oldest-to-newest; reverse entry and ordering are described below.
 
 When external-sequencer tracking is enabled, Superlooper records sequencer
 advances alongside the rendered trigger tape. Playback replays those advances
@@ -256,19 +276,66 @@ Superlooper stages: for example, `N=2, L=8` advances an external sequencer eight
 times over sixteen raw clocks and returns an eight-step sequence to its starting
 stage.
 
-Param and Length have separate mutation and loop values. At each LOOP boundary
-the newly active values remain latched until that physical control moves beyond
-a small noise threshold. Entering LOOP always starts Param at exact 1:1 speed;
-moving it gives a smooth quadratic range from 1/8x through 8x, with an
-exact-speed center region. On the first LOOP after selecting Superlooper,
-Length uses the current physical slider position. Later loop entries recall the
-preceding loop span until Length moves. Changes to a moved Length are applied at
-a loop-stage boundary. Leaving LOOP restores the prior mutation Param and
-Length until they move.
+Param and Length have separate mutation and loop memories. You can adjust both
+for mutations outside LOOP, then re-enter LOOP with its previous speed,
+direction/pause, and length intact. Each physical control takes over its newly
+active value only after moving beyond a small noise threshold. Leaving LOOP
+similarly restores the previous mutation values.
 
-Chance deliberately remains the live v0.99 probability control while recording.
-Its decisions are already present in the rendered tape, so Chance is not
-reapplied during playback. New loop-density semantics remain deferred.
+With CYCLE up, hold MODE to enter setup. Move PARAM into one of four quarters to
+select the playback style, then hold MODE again to save and exit:
+
+| PARAM position, left to right | Playback style | Ring LED |
+| --- | --- | --- |
+| First quarter | Smooth forward | 1 |
+| Second quarter | Quantized forward | 3 |
+| Third quarter | Smooth bidirectional | 5 |
+| Fourth quarter | Quantized bidirectional | 7 |
+
+Entering setup alone does not change the selection; PARAM must move. Length
+continues to edit N, and the existing mode-dial menu options remain available.
+**Playback style and N survive reboot** after saving on setup exit. The loop and
+mutation performance memories last only until reboot or a CYCLE engine switch.
+The first LOOP then starts at +1x and takes its length from the physical slider.
+Changing playback style in setup also resets loop speed to +1x until PARAM moves
+in LOOP. The default style is smooth forward, from 1/8x through 8x with a broad
+exact-speed center.
+
+Quantized forward speeds are 1/8x, 1/4x, 1/2x, 1x, 2x, 4x, and 8x, with
+hysteresis between adjacent settings. Bidirectional PARAM runs from reverse
+8x at the left through a center pause to forward 8x at the right. Its quantized
+version uses the same seven magnitudes in each direction. Reverse reflects the
+recorded trigger onsets and transport events across the whole phrase, including
+rhythms within a stage. It emits normal trigger pulses with recorded widths
+scaled by speed. Overlapping reversed tails are separated by one output-service
+pass so the next attack remains audible.
+
+Reverse entry is anchored to a stage attack. On a divided stage boundary it
+starts one stage before the most recently completed stage; between divided
+boundaries it uses the most recent complete stage. L=1 repeats its sole captured
+stage. Thus an ordinary beat stays on the beat while a recorded accelerating
+bounce plays with decelerating hit spacing. Length changes restart at the newest
+captured stage's attack. Pause freezes the playhead and silences trigger outputs.
+Speed and direction changes preserve the tape position; direction is retained
+through pause. Control recall and the first-entry 1:1 default remain unchanged.
+
+CLOCK IN continues advancing the independent eight-step reference and N-divider
+phase during forward playback, reverse playback, and pause. With external
+tracking enabled, LOOP exit discards unplayed playback clocks and catches up
+from the emitted sequencer position to that reference. The next normal advance
+remains on the original N-divided clock grid. Reverse transport uses forward
+clock bursts to reach preceding steps on an eight-step external sequencer.
+
+Moved Length changes take effect at a loop-stage boundary; PARAM speed changes
+take effect immediately.
+
+Chance remains a live probability control while recording. Superlooper blocks
+new mutations at readings 0-10 to tolerate noise at the slider's bottom, while
+preserving the probability curve above that dead zone. Moving down into the
+dead zone immediately closes any open eligibility windows; existing mutations
+finish their sampled duration. Its decisions are already present in the
+rendered tape, so Chance is not reapplied during playback. New loop-density
+semantics remain deferred.
 
 Each raw CLOCK IN edge evaluates Chance and opens or closes an eligibility
 window until the next clock edge. A trigger inside an open window begins its
@@ -283,14 +350,22 @@ SuperLooper Ball uses a time-domain curve while the classic Ball implementation
 remains untouched. Center PARAM is dry pass-through. At either side, the curve
 moves continuously between the most recent plausible trigger period and a fast
 14 ms period that preserves a real low gap instead of collapsing into a solid
-gate. Skip cannot add or remove clocks from Superlooper's dedicated transport;
-it retains the stock trigger-channel pass-through behavior.
+gate. With tracking enabled, Skip modifies external clock transport and restores
+its N-divided phase using an eight-stage (`8*N` raw-clock) reference. With tracking
+disabled, external clocking stays on the plain N division. Skip retains the
+trigger-channel pass-through behavior.
 
 The Superlooper test battery covers fresh CYCLE transitions, control pickup,
 newest-stage anchoring, N division, `L * N` mutation lifetimes, trigger-owned
 launch and mode preemption, sub-clock capture, crossed-onset playback, smooth
-speed endpoints, tape-head resumption, recorded external transport, Skip
-transport isolation, and all trigger-producing mutation modes. It also compares
+and quantized speed mappings, menu persistence, speed/direction/Length recall,
+reverse onset timing, tape-head resumption, recorded external transport, Skip
+catch-up, the Chance dead zone, clock loss/restart, and all trigger-producing
+mutation modes. The playback tests include 144 reverse-entry cases and 144
+exit/catch-up cases across N-divider phases. They compare actual simulated
+output edges for a steady beat, accelerating bounce example, unequal gate widths,
+and off-grid triggers against independently calculated reversed hit times.
+The suite also compares
 an exact deterministic fingerprint of the classic runner so Superlooper changes
 cannot silently alter the stock timing path.
 

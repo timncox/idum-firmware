@@ -22,6 +22,19 @@ const uint8_t superlooperClocksPerStepOptions[SUPERLOOPER_N_OPTION_COUNT] =
 const uint8_t superlooperLengthPositionToNOption[8] = { 0, 1, 2, 3, 4, 4, 5, 5 };
 const uint8_t SUPERLOOPER_N_EEPROM_MARKER = 0x4e;
 const unsigned int superlooperPickupThreshold = 12;
+//Ignore a little ADC noise at the bottom of Chance. Keep the curve above this
+//floor unchanged and honor a larger shared threshold in custom builds.
+const unsigned int superlooperChanceDeadZone = 10;
+//0: smooth forward, 1: stepped forward, 2: smooth bidirectional,
+//3: stepped bidirectional. Separate EEPROM bytes preserve existing settings.
+uint8_t superlooperPlaybackOption = 0;
+const uint8_t SUPERLOOPER_PLAYBACK_EEPROM_MARKER = 0x53;
+int8_t superlooperSpeedBin = -1;
+//Use unity until the first loop PARAM gesture; retain that gesture on re-entry.
+bool superlooperSpeedPickup = 0;
+unsigned int superlooperPlaybackEditReference = 0;
+bool superlooperPlaybackEditArmed = 0;
+uint8_t superlooperMenuDisplayLed = 0;
 
 // Four 32-bit channel words per raw clock: one bit per sub-clock tape cell.
 // Nine stages keep eight complete stages available while a ninth is recording.
@@ -120,7 +133,11 @@ uint8_t superlooperLoopCrossedTriggerMask = 0;
 unsigned long superlooperLoopTransportLastTime = 0;
 uint32_t superlooperLoopTransportAccumulator = 0;
 unsigned int superlooperLoopSpeedControl = 512;
-uint16_t superlooperLoopSpeedQ8 = 256;
+int16_t superlooperLoopSpeedQ8 = 256;
+bool superlooperLoopReverse = 0;
+uint16_t superlooperReverseGateRemaining[4] = {};
+uint8_t superlooperReverseLastOutputMask = 0;
+uint8_t superlooperReverseRetriggerMask = 0;
 
 uint8_t superlooperLoopTransportStage = 0;
 uint8_t superlooperLoopNaturalStage = 0;
@@ -224,6 +241,38 @@ uint16_t superlooperLoopSpeedQ8ForParam(unsigned int control) {
   }
 
   return 256;
+}
+
+int16_t superlooperSelectedLoopSpeed(unsigned int control) {
+  if (superlooperSpeedPickup) return 256;
+  control = min((unsigned int)1024, control);
+  bool bidirectional = superlooperPlaybackOption & 2;
+  if (superlooperPlaybackOption & 1) {
+    uint8_t count = bidirectional ? 15 : 7;
+    int8_t requested = ((uint32_t)control * count) / 1025;
+    //Eight ADC counts of hysteresis at each boundary prevents adjacent
+    //musical ratios from chattering while the control is stationary.
+    int lower = ((int)superlooperSpeedBin * 1025) / count - 8;
+    int upper = (((int)superlooperSpeedBin + 1) * 1025) / count + 8;
+    if (superlooperSpeedBin < 0 || (int)control < lower || (int)control >= upper) {
+      superlooperSpeedBin = requested;
+    }
+    if (!bidirectional) return (int16_t)32 << superlooperSpeedBin;
+    if (superlooperSpeedBin == 7) return 0;
+    if (superlooperSpeedBin < 7) return -((int16_t)32 << (6 - superlooperSpeedBin));
+    return (int16_t)32 << (superlooperSpeedBin - 8);
+  }
+  if (!bidirectional) return superlooperLoopSpeedQ8ForParam(control);
+  if (control >= 480 && control <= 544) return 0;
+  unsigned long distance = control < 480 ? 480 - control : control - 544;
+  int16_t speed = (distance * distance * 2048UL) / (480UL * 480UL);
+  return control < 480 ? -speed : speed;
+}
+
+void superlooperLoadPlaybackSetting() {
+  uint8_t option = EEPROM.read(8);
+  superlooperPlaybackOption = (EEPROM.read(9) == SUPERLOOPER_PLAYBACK_EEPROM_MARKER
+    && option < 4) ? option : 0;
 }
 
 void superlooperClearTape() {
@@ -350,6 +399,7 @@ void superlooperUpdateControlBank() {
 
   if (loopEnable) {
     if (!superlooperParamPickup) {
+      superlooperSpeedPickup = 0;
       superlooperLoopParam = superlooperPhysicalParam;
       superlooperLoopUnscaledParam = superlooperPhysicalUnscaledParam;
       superlooperLoopRatchetAmount = superlooperPhysicalRatchetAmount;
@@ -572,11 +622,29 @@ void superlooperTrackSequencerAdvance(unsigned int clockCount, bool recordEvent)
   superlooperRecordTransportAdvance(clockCount);
 }
 
-void superlooperQueueTrackedSequencerClocks(unsigned int clockCount) {
+bool superlooperClockQueueBusy() {
+  return (superlooperQueuedSequencerClocks > 0)
+      || superlooperQueuedClockPulseHigh || superlooperQueuedClockGapStarted;
+}
+
+void superlooperQueueSequencerClocks(unsigned int clockCount) {
   if (clockCount == 0) return;
   uint32_t queued = (uint32_t)superlooperQueuedSequencerClocks + clockCount;
   superlooperQueuedSequencerClocks = min(queued, (uint32_t)UINT16_MAX);
+}
+
+void superlooperQueueTrackedSequencerClocks(unsigned int clockCount) {
+  superlooperQueueSequencerClocks(clockCount);
   superlooperTrackSequencerAdvance(clockCount, 0);
+}
+
+void superlooperDiscardQueuedClocks() {
+  //The tracked stage includes scheduled advances. Remove only pulses that
+  //have not started; preserve an in-flight pulse and its mandatory low gap.
+  superlooperTrackedSequencerStage = (superlooperTrackedSequencerStage
+    + SUPERLOOPER_STAGE_COUNT - (superlooperQueuedSequencerClocks % SUPERLOOPER_STAGE_COUNT))
+    % SUPERLOOPER_STAGE_COUNT;
+  superlooperQueuedSequencerClocks = 0;
 }
 
 void superlooperServiceQueuedClock() {
@@ -634,7 +702,10 @@ void superlooperAdvanceLogicalTransport(unsigned int logicalClockCount) {
     superlooperTranslateLogicalClockAdvances(logicalClockCount);
   if (sequencerAdvances == 0) return;
 
-  superlooperSendSequencerClocks(sequencerAdvances);
+  //A mutation can launch on the LOOP exit edge while catch-up is still
+  //pending. Its clocks must follow that burst rather than overwrite it.
+  if (superlooperClockQueueBusy()) superlooperQueueSequencerClocks(sequencerAdvances);
+  else superlooperSendSequencerClocks(sequencerAdvances);
   superlooperTrackSequencerAdvance(sequencerAdvances, 1);
 }
 
@@ -642,6 +713,12 @@ void superlooperUpdateMutationClockGate() {
   if (clockState && !superlooperMutationClockStateOld) {
     unsigned int sequencerAdvances = superlooperTranslateLogicalClockAdvances(1);
     superlooperMutationClockGate = sequencerAdvances > 0;
+    if (superlooperMutationClockGate && superlooperClockQueueBusy()) {
+      //Serialize this live edge after the catch-up clocks. Leave its gate low
+      //for the whole input pulse, even if the queue drains before it falls.
+      superlooperQueueSequencerClocks(sequencerAdvances);
+      superlooperMutationClockGate = 0;
+    }
     superlooperTrackSequencerAdvance(sequencerAdvances, 1);
   }
   else if (!clockState) {
@@ -678,6 +755,82 @@ void superlooperPlayTransportCell(uint16_t phraseCell) {
   superlooperLoopTransportStage = superlooperTrackedSequencerStage;
 }
 
+//Reverse the times of recorded attacks, not gate voltage edges. Pulse widths
+//still run forward in playback time so a short gate attacks on its beat.
+uint16_t superlooperReverseGateWidth(uint16_t cell, uint8_t channel) {
+  uint16_t width = 0;
+  while (width < superlooperLoopBaseCellCount) {
+    uint16_t captured = superlooperCapturedCellForPhraseCell(cell);
+    uint16_t raw = superlooperWrapRecordIndex((long)superlooperCaptureStartIndex
+      + captured / SUPERLOOPER_SUBDIVISIONS_PER_CLOCK);
+    uint8_t tick = captured % SUPERLOOPER_SUBDIVISIONS_PER_CLOCK;
+    uint8_t available = SUPERLOOPER_SUBDIVISIONS_PER_CLOCK - tick;
+    uint32_t bits = superlooperRenderedTape[raw][channel] >> tick;
+    uint8_t run = 0;
+    if (bits == (0xffffffffUL >> tick)) run = available;
+    else while (bits & 1) { ++run; bits >>= 1; }
+    width += run;
+    if (width >= superlooperLoopBaseCellCount) return 0xffff; //Held for the whole phrase.
+    if (run < available) return width;
+    cell = (cell + run) % superlooperLoopBaseCellCount;
+  }
+  return width;
+}
+
+uint8_t superlooperReverseGateMask() {
+  uint8_t mask = 0;
+  for (uint8_t channel = 0; channel < 4; ++channel)
+    if (superlooperReverseGateRemaining[channel]) mask |= 1 << channel;
+  return mask;
+}
+
+void superlooperStartReverseGates(uint8_t mask) {
+  //Reversing unequal-width gates can make their tails overlap. Separate a
+  //new attack from an already-high output by one service pass, then reassert
+  //it even if the recorded pulse is shorter than that service interval.
+  superlooperReverseRetriggerMask |= mask & superlooperReverseLastOutputMask;
+  for (uint8_t channel = 0; channel < 4; ++channel)
+    if (mask & (1 << channel)) superlooperReverseGateRemaining[channel] =
+      superlooperReverseGateWidth(superlooperLoopBaseCell, channel);
+}
+
+void superlooperResetReverseGates() {
+  superlooperReverseLastOutputMask = superlooperReverseRetriggerMask = 0;
+  for (uint8_t channel = 0; channel < 4; ++channel) superlooperReverseGateRemaining[channel] = 0;
+  if (superlooperLoopReverse)
+    superlooperStartReverseGates(superlooperRenderedLoopCellState(superlooperLoopBaseCell));
+}
+
+void superlooperAlignTransportCell(uint16_t cell, bool retrigger) {
+  uint16_t captured = superlooperCapturedCellForPhraseCell(cell);
+  uint16_t raw = superlooperWrapRecordIndex((long)superlooperCaptureStartIndex
+    + captured / SUPERLOOPER_SUBDIVISIONS_PER_CLOCK);
+  uint8_t lastTick = captured % SUPERLOOPER_SUBDIVISIONS_PER_CLOCK;
+  uint8_t target = superlooperTransportStageAtStart[raw];
+  for (uint8_t tick = 0; tick <= lastTick; ++tick)
+    target = (target + superlooperTransportAdvanceAt(raw, tick)) % SUPERLOOPER_STAGE_COUNT;
+  uint8_t clocks = (target + SUPERLOOPER_STAGE_COUNT - superlooperTrackedSequencerStage)
+    % SUPERLOOPER_STAGE_COUNT;
+  if (!clocks && retrigger) clocks = SUPERLOOPER_STAGE_COUNT;
+  superlooperQueueTrackedSequencerClocks(clocks);
+  superlooperLoopTransportStage = superlooperTrackedSequencerStage;
+}
+
+void superlooperReverseTransportCell(uint16_t cell) {
+  uint16_t captured = superlooperCapturedCellForPhraseCell(cell);
+  uint16_t raw = superlooperWrapRecordIndex((long)superlooperCaptureStartIndex
+    + captured / SUPERLOOPER_SUBDIVISIONS_PER_CLOCK);
+  //Hold the last event's position until the next recorded onset is reached.
+  //Restoring checkpoints at clock tails would advance a stage one beat early.
+  if (superlooperTransportAdvanceAt(raw, captured % SUPERLOOPER_SUBDIVISIONS_PER_CLOCK))
+    superlooperAlignTransportCell(cell, 1);
+}
+
+void superlooperPlayLoopStartTransport() {
+  if (superlooperLoopReverse) superlooperAlignTransportCell(superlooperLoopBaseCell, 1);
+  else superlooperPlayTransportCell(superlooperLoopBaseCell);
+}
+
 void superlooperSendLoopStage(uint8_t capturedStage, bool repeatedStage) {
   if (!superlooperLoopTransportInitialized) {
     superlooperLoopTransportStage = capturedStage;
@@ -697,7 +850,9 @@ void superlooperSendLoopStage(uint8_t capturedStage, bool repeatedStage) {
 
 void superlooperSetLoopPositionVariables() {
   uint16_t stageCells = superlooperCellsPerStage();
-  uint8_t relativeStage = (stageCells > 0) ? superlooperLoopBaseCell / stageCells : 0;
+  uint8_t relativeStage = (stageCells > 0) ? (superlooperLoopBaseCell
+    + (superlooperLoopReverse ? stageCells - 1 : 0)) / stageCells : 0;
+  relativeStage %= loopLength;
   loopIndex = (superlooperLoopBaseStartStage + relativeStage) % SUPERLOOPER_STAGE_COUNT;
 }
 
@@ -706,20 +861,36 @@ void superlooperConfigureLoopLength(unsigned int requestedLength) {
     min((unsigned int)SUPERLOOPER_STAGE_COUNT, requestedLength));
   superlooperLoopBaseStartStage = SUPERLOOPER_STAGE_COUNT - loopLength;
   superlooperLoopBaseCellCount = (uint16_t)loopLength * superlooperCellsPerStage();
-  superlooperLoopBaseCell = 0;
+  //Anchor reverse to a stage attack. Subsequent cells still run backward.
+  superlooperLoopBaseCell = superlooperLoopReverse
+    ? (loopLength - 1) * superlooperCellsPerStage() : 0;
   superlooperSetLoopPositionVariables();
 }
 
 void superlooperAdvanceLoopCell() {
+  uint16_t previousCell = superlooperLoopBaseCell;
   uint8_t previousState = superlooperRenderedLoopCellState(superlooperLoopBaseCell);
-  superlooperLoopBaseCell =
-    (superlooperLoopBaseCell + 1) % superlooperLoopBaseCellCount;
+  bool reverse = superlooperLoopReverse;
+  superlooperLoopBaseCell = reverse
+    ? (superlooperLoopBaseCell == 0 ? superlooperLoopBaseCellCount - 1 : superlooperLoopBaseCell - 1)
+    : (superlooperLoopBaseCell + 1) % superlooperLoopBaseCellCount;
 
   uint8_t currentState = superlooperRenderedLoopCellState(superlooperLoopBaseCell);
-  superlooperLoopCrossedTriggerMask |= currentState & ~previousState;
+  if (reverse) {
+    for (uint8_t channel = 0; channel < 4; ++channel)
+      if (superlooperReverseGateRemaining[channel] && superlooperReverseGateRemaining[channel] != 0xffff)
+        --superlooperReverseGateRemaining[channel];
+    uint16_t beforeAttack = superlooperLoopBaseCell == 0
+      ? superlooperLoopBaseCellCount - 1 : superlooperLoopBaseCell - 1;
+    uint8_t attacks = currentState & ~superlooperRenderedLoopCellState(beforeAttack);
+    superlooperStartReverseGates(attacks);
+    superlooperLoopCrossedTriggerMask |= attacks;
+  }
+  else superlooperLoopCrossedTriggerMask |= currentState & ~previousState;
 
   if (externalSequencerTracking) {
-    superlooperPlayTransportCell(superlooperLoopBaseCell);
+    if (reverse) superlooperReverseTransportCell(superlooperLoopBaseCell);
+    else superlooperPlayTransportCell(superlooperLoopBaseCell);
   }
 
   uint16_t stageCells = superlooperCellsPerStage();
@@ -738,10 +909,17 @@ void superlooperAdvanceLoopTransport(unsigned long currentMicros) {
   superlooperLoopTransportLastTime = currentMicros;
   if ((elapsed == 0) || (lastClockInterval == 0) || (superlooperLoopBaseCellCount == 0)) return;
 
-  superlooperLoopSpeedQ8 = superlooperLoopSpeedQ8ForParam(superlooperLoopSpeedControl);
+  int16_t speed = superlooperSelectedLoopSpeed(superlooperLoopSpeedControl);
+  if (speed && ((speed < 0) != superlooperLoopReverse)) {
+    superlooperLoopReverse = speed < 0;
+    superlooperResetReverseGates();
+    if (externalSequencerTracking) superlooperAlignTransportCell(superlooperLoopBaseCell, 0);
+  }
+  superlooperLoopSpeedQ8 = speed;
+  if (speed == 0) return;
   //Accumulator units are microseconds * Q8 speed. Fold the subdivision into
   //the per-cell threshold while keeping this hot path in 32-bit AVR math.
-  superlooperLoopTransportAccumulator += (uint32_t)elapsed * superlooperLoopSpeedQ8;
+  superlooperLoopTransportAccumulator += (uint32_t)elapsed * (speed < 0 ? -speed : speed);
   uint32_t threshold = (uint32_t)lastClockInterval
     * (256 / SUPERLOOPER_SUBDIVISIONS_PER_CLOCK);
   if (superlooperLoopTransportAccumulator < threshold) return;
@@ -755,11 +933,18 @@ void superlooperAdvanceLoopTransport(unsigned long currentMicros) {
 }
 
 void superlooperInitializeLoopTransport() {
+  superlooperLoopSpeedControl = superlooperLoopParam;
+  superlooperLoopSpeedQ8 = superlooperSelectedLoopSpeed(superlooperLoopSpeedControl);
+  if (superlooperLoopSpeedQ8) superlooperLoopReverse = superlooperLoopSpeedQ8 < 0;
   superlooperConfigureLoopLength(superlooperLoopLength);
+  //At phase zero the last complete stage just played: start one stage before
+  //it. Mid-stage entry uses the most recent complete stage. L=1 repeats itself.
+  if (superlooperLoopReverse && superlooperSequencerClockPhase == 0 && loopLength > 1)
+    superlooperLoopBaseCell -= superlooperCellsPerStage();
+  superlooperSetLoopPositionVariables();
+  superlooperResetReverseGates();
   superlooperLoopPendingLength = loopLength;
   superlooperLoopLengthChangePending = 0;
-  superlooperLoopSpeedControl = superlooperLoopParam;
-  superlooperLoopSpeedQ8 = superlooperLoopSpeedQ8ForParam(superlooperLoopSpeedControl);
   superlooperLoopTransportLastTime = micros();
   superlooperLoopTransportAccumulator = 0;
   superlooperLoopCrossedTriggerMask = 0;
@@ -777,11 +962,12 @@ void superlooperInitializeLoopTransport() {
   superlooperLoopTransportInitialized = 1;
 
   uint8_t firstCapturedStage =
-    (superlooperLoopCaptureNaturalStage + superlooperLoopBaseStartStage)
+    (superlooperLoopCaptureNaturalStage + loopIndex)
     % SUPERLOOPER_STAGE_COUNT;
   if (externalSequencerTracking) {
-    superlooperPlayTransportCell(0);
+    superlooperPlayLoopStartTransport();
   }
+  else if (superlooperLoopReverse && superlooperLoopSpeedQ8) superlooperSendLoopStage(firstCapturedStage, 1);
   else superlooperLoopTransportStage = firstCapturedStage;
 }
 
@@ -823,11 +1009,14 @@ void superlooperEnterLoop() {
   //of recalling an arbitrary default. Later entries recall the previous loop
   //span until Length moves, preserving the useful lazy-pickup behavior.
   if (!superlooperLoopLengthInitialized) {
+    superlooperSpeedPickup = 1;
     superlooperLoopLength = lengthPosition + 1;
     superlooperLoopPendingLength = superlooperLoopLength;
     superlooperLoopLengthInitialized = 1;
   }
   loopEnable = 1;
+  //Keep speed, direction, and quantizer hysteresis from the previous loop.
+  //The control-bank pickup below protects them until PARAM moves.
   superlooperMutationClockGate = 0;
   superlooperArmControlPickup(1);
   superlooperCaptureCompleteWindow();
@@ -843,6 +1032,10 @@ void superlooperEnterLoop() {
 }
 
 void superlooperExitLoop() {
+  //Slow external sequencers can leave playback pulses queued at high speeds.
+  //Exit catches up from the position actually emitted, without draining that
+  //obsolete playback backlog first. N's independent raw-clock phase survives.
+  superlooperDiscardQueuedClocks();
   superlooperFinishLoopTransport();
   loopEnable = 0;
   superlooperMutationTransportStarted = superlooperSequencerTimingStarted;
@@ -901,6 +1094,8 @@ void superlooperDetermineLooperStatus() {
 }
 
 uint8_t superlooperUpdateLoopPlayback() {
+  uint8_t deferredReverseMask = superlooperReverseRetriggerMask;
+  superlooperReverseRetriggerMask = 0;
   superlooperLoopCrossedTriggerMask = 0;
   superlooperLoopStageBoundary = 0;
 
@@ -916,19 +1111,28 @@ uint8_t superlooperUpdateLoopPlayback() {
 
   if (superlooperLoopLengthChangePending && superlooperLoopStageBoundary) {
     superlooperConfigureLoopLength(superlooperLoopPendingLength);
+    superlooperResetReverseGates();
     superlooperLoopLengthChangePending = 0;
     uint8_t firstCapturedStage =
-      (superlooperLoopCaptureNaturalStage + superlooperLoopBaseStartStage)
+      (superlooperLoopCaptureNaturalStage + loopIndex)
       % SUPERLOOPER_STAGE_COUNT;
     if (externalSequencerTracking) {
-      superlooperPlayTransportCell(0);
+      superlooperPlayLoopStartTransport();
     }
     else superlooperSendLoopStage(firstCapturedStage, 0);
   }
 
   superlooperSetLoopPositionVariables();
-  return superlooperRenderedLoopCellState(superlooperLoopBaseCell)
-       | superlooperLoopCrossedTriggerMask;
+  if (superlooperLoopSpeedQ8 == 0) {
+    superlooperReverseLastOutputMask = 0;
+    return 0; //Pause freezes tape and silences gates.
+  }
+  uint8_t mask = superlooperLoopCrossedTriggerMask;
+  if (superlooperLoopReverse) mask |= superlooperReverseGateMask() | deferredReverseMask;
+  else mask |= superlooperRenderedLoopCellState(superlooperLoopBaseCell);
+  mask &= ~superlooperReverseRetriggerMask;
+  superlooperReverseLastOutputMask = mask;
+  return mask;
 }
 
 unsigned int superlooperMutationRawClockCount(unsigned int sampledLength) {
@@ -1052,7 +1256,19 @@ void superlooperEndClockMutation() {
 
   if (((originalModifyLength > 1) || (mode == 7))
       && externalSequencerTracking) {
-    maintainCycle();
+    if (mode == 7) {
+      //Skip counts logical raw clocks. One complete external sequence spans
+      //8*N of those clocks; stock's modulo-eight correction loses N's phase.
+      unsigned int cycleClocks = SUPERLOOPER_STAGE_COUNT * superlooperClocksPerStep;
+      unsigned int elapsedClocks = originalModifyLength - modifyLength
+                                + (modifyLength > 0);
+      unsigned int emittedClocks = (clockSkipCycleCount + clockRatchetCycleCount)
+                                % cycleClocks;
+      unsigned int correction = ((elapsedClocks % cycleClocks)
+                                  + cycleClocks - emittedClocks) % cycleClocks;
+      superlooperAdvanceLogicalTransport(correction);
+    }
+    else maintainCycle();
   }
   state.active = 0;
   state.clocksRemaining = 0;
@@ -1128,11 +1344,20 @@ unsigned int superlooperProbabilityRoll(unsigned int penalty) {
              probabilityUpperThreshold);
 }
 
+bool superlooperChanceIsOff() {
+  return probRead <= max(superlooperChanceDeadZone, probabilityLowerThreshold);
+}
+
 bool superlooperWindowFromRoll(unsigned int roll) {
-  return (roll < probRead) && (probRead > probabilityLowerThreshold) && !menuMode;
+  return (roll < probRead) && !superlooperChanceIsOff() && !menuMode;
 }
 
 void superlooperOpenMutationWindows() {
+  //Bottom means no new mutations immediately, including off-grid hits that
+  //would otherwise use a window opened before the slider moved down.
+  if (superlooperChanceIsOff()) {
+    for (uint8_t lane = 0; lane < 5; ++lane) superlooperMutationWindows[lane] = 0;
+  }
   if (!clockEdge) return;
 
   if (probabilityModifier > 0) probabilityModifier -= 1;
@@ -1200,6 +1425,39 @@ void superlooperConsiderTriggerMutation(
   }
 }
 
+#if IDUM_ENABLE_CLOCK_STOP_TIMEOUT
+void superlooperHandleClockTimeout(unsigned long currentMicros) {
+  if (lastClockInterval == 0) return;
+  unsigned long timeout = (clockStopTimeoutIntervals > 0
+      && lastClockInterval > ULONG_MAX / clockStopTimeoutIntervals)
+    ? ULONG_MAX : lastClockInterval * clockStopTimeoutIntervals;
+  timeout = max(timeout, clockStopMinimumMicros);
+  if ((currentMicros - lastClockTime) <= timeout) return;
+
+  //An old Chance window must not launch a fresh mutation after clock loss.
+  for (uint8_t lane = 0; lane < 5; ++lane) superlooperMutationWindows[lane] = 0;
+  if (superlooperMutationLanes[0].active
+      && (isClockTimeoutMode(mode) || (mode == 7))) {
+    //Cancel rather than catch up: clock loss must not generate another burst.
+    superlooperMutationLanes[0].active = 0;
+    superlooperMutationLanes[0].clocksRemaining = 0;
+    modifyLength = 0;
+    endModification = 1;
+    clockState = 0;
+    clockChoke = 1;
+    clockRatchet = clockSkip = clockRatchetState = clockRatchetStateOld = forceSkip = 0;
+    superlooperMutationClockGate = 0;
+    superlooperMutationClockStateOld = clockIn;
+  }
+  for (uint8_t channel = 0; channel < 4; ++channel) {
+    const SuperlooperMutationLaneState &state = superlooperMutationLanes[channel + 1];
+    if (state.active && isClockTimeoutMode(state.activeMode)) {
+      superlooperEndTriggerMutation(channel);
+    }
+  }
+}
+#endif
+
 void superlooperMutationScheduler() {
   startModification = startModification1 = startModification2
                     = startModification3 = startModification4 = 0;
@@ -1209,6 +1467,9 @@ void superlooperMutationScheduler() {
   carryOverActive = 0;
 
   unsigned long currentMicros = micros();
+#if IDUM_ENABLE_CLOCK_STOP_TIMEOUT
+  superlooperHandleClockTimeout(currentMicros);
+#endif
   if (modeBtnFallingEdge) {
     superlooperEndClockMutation();
     for (uint8_t channel = 0; channel < 4; ++channel) {
@@ -1768,7 +2029,32 @@ void superlooperHandleNMenu() {
   if (menuMode && !superlooperMenuModeOld) {
     superlooperNEditPosition = lengthPosition;
     superlooperNEditArmed = 1;
-    superlooperNDisplayActive = 0;
+    superlooperPlaybackEditReference = superlooperPhysicalParam;
+    superlooperPlaybackEditArmed = 0;
+    superlooperNDisplayActive = 1;
+    superlooperNDisplayTime = micros();
+    superlooperMenuDisplayLed = superlooperPlaybackOption * 2;
+  }
+
+  if (menuMode) {
+    if (superlooperControlMoved(superlooperPhysicalParam, superlooperPlaybackEditReference)) {
+      superlooperPlaybackEditArmed = 1;
+    }
+    uint8_t requested = min((unsigned int)3, superlooperPhysicalParam / 256);
+    int lower = (int)superlooperPlaybackOption * 256 - 12;
+    int upper = ((int)superlooperPlaybackOption + 1) * 256 + 12;
+    if (superlooperPlaybackEditArmed && requested != superlooperPlaybackOption
+        && ((int)superlooperPhysicalParam < lower || (int)superlooperPhysicalParam >= upper)) {
+      superlooperPlaybackOption = requested;
+      superlooperSpeedBin = -1;
+      //Changing the control's meaning resets loop speed to +1x until
+      //PARAM is deliberately picked up in LOOP after leaving the menu.
+      superlooperSpeedPickup = 1;
+      superlooperParamPickup = 1;
+      superlooperNDisplayTime = micros();
+      superlooperNDisplayActive = 1;
+      superlooperMenuDisplayLed = requested * 2;
+    }
   }
 
   if (menuMode && superlooperNEditArmed
@@ -1779,22 +2065,27 @@ void superlooperHandleNMenu() {
       superlooperSetNOption(requestedNOption);
       superlooperNDisplayTime = micros();
       superlooperNDisplayActive = 1;
+      superlooperMenuDisplayLed = superlooperNOption;
     }
   }
 
   if (!menuMode && superlooperMenuModeOld) {
     EEPROM.write(6, superlooperNOption);
     EEPROM.write(7, SUPERLOOPER_N_EEPROM_MARKER);
+    EEPROM.write(8, superlooperPlaybackOption);
+    EEPROM.write(9, SUPERLOOPER_PLAYBACK_EEPROM_MARKER);
     superlooperNEditArmed = 0;
     superlooperNDisplayActive = 0;
     superlooperPickupLengthReference = superlooperPhysicalLengthReading;
     superlooperLengthPickup = 1;
+    superlooperPickupParamReference = superlooperPhysicalParam;
+    superlooperParamPickup = 1;
   }
 
   superlooperMenuModeOld = menuMode;
   if (menuMode && superlooperNDisplayActive) {
     if ((micros() - superlooperNDisplayTime) < 1000000UL) {
-      writeModeLed(superlooperNOption);
+      writeModeLed(superlooperMenuDisplayLed);
     }
     else superlooperNDisplayActive = 0;
   }
@@ -1854,6 +2145,12 @@ void resetSuperlooperEngine() {
   cycleCount = 0;
 
   superlooperLoadNSetting();
+  superlooperLoadPlaybackSetting();
+  superlooperSpeedBin = -1;
+  superlooperSpeedPickup = 0;
+  superlooperPlaybackEditArmed = 0;
+  superlooperLoopReverse = 0;
+  superlooperResetReverseGates();
   superlooperResetSequencerTiming();
   superlooperLoopBaseCell = 0;
   superlooperLoopBaseCellCount = 0;

@@ -51,6 +51,7 @@ void writeModeLed(unsigned int ledIndex);
 void displayFirmwareBootSignature();
 #if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
 void superlooperReadInputs();
+bool superlooperWindowFromRoll(unsigned int roll);
 void superlooperArmControlPickup(bool enteringLoop);
 void superlooperDetermineLooperStatus();
 void superlooperSetNOption(uint8_t option);
@@ -289,6 +290,17 @@ std::function<void()> interruptEnableHook;
 void resetSimulation();
 void printWrites();
 int runScenario(const std::string& name);
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
+int superlooperPlaybackRecallScenario(int option);
+int superlooperPlaybackMappingScenario();
+int superlooperPlaybackMenuScenario();
+int superlooperReverseEntryScenario(int nOption, int phase, int span, int option, bool tracking);
+int superlooperReverseEntriesScenario();
+int superlooperReverseRhythmScenario();
+int superlooperReverseTapeScenario();
+int superlooperPlaybackExitScenario(int nOption, int phase, int option, int control);
+int superlooperPlaybackExitsScenario();
+#endif
 #if defined(IDUM_SIM_ELI_OO) || defined(IDUM_SIM_HAS_BOOT_RESET)
 int bootResetScenario();
 #endif
@@ -1636,6 +1648,173 @@ int superlooperSkipTransportRegressionScenario() {
 #endif
 }
 
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
+//Configure saved options, then exercise the actual dispatcher with panel/CV
+//inputs. Transport and scheduler state are observed, never assigned by tests.
+void prepareSuperlooperTransportIO(uint8_t nOption) {
+  resetSimulation();
+  setup();
+  setLogicalGate(17, true);
+  runFor(1000);
+  externalSequencerTracking = true;
+  runFor(1000);
+  superlooperSetNOption(nOption);
+  setLogicalAnalog(20, 0);
+  setLogicalAnalog(18, 0);
+  setLogicalAnalog(19, 512);
+  runFor(1000);
+  writes.clear();
+}
+
+void transportIOClock(unsigned long &nextClock, unsigned long stepMicros = 100) {
+  runUntil(nextClock, stepMicros);
+  setLogicalGate(15, true);
+  runFor(10000, stepMicros);
+  setLogicalGate(15, false);
+  runFor(1000, stepMicros);
+  nextClock += 100000;
+}
+
+int superlooperSkipCatchupIOScenario(uint8_t nOption) {
+  prepareSuperlooperTransportIO(nOption);
+  const unsigned int n = superlooperClocksPerStep;
+  unsigned long nextClock = micros() + 100000;
+  //Establish the measured period and stop immediately before a stage boundary.
+  for (unsigned int i = 0; i < 2 * n; ++i) transportIOClock(nextClock);
+  const int before = countOutputOnsets(13);
+  configureAlwaysModify(7, 288, 0); //Skip four raw clocks, L=1.
+  transportIOClock(nextClock);
+  const bool launched = superlooperMutationDebugActive(0);
+  setLogicalAnalog(20, 0); //Allow the sampled mutation to finish without renewal.
+  for (unsigned int i = 0; i < n; ++i) transportIOClock(nextClock);
+  const int advances = countOutputOnsets(13) - before;
+  const bool aligned = (advances % 8) == 2
+    && superlooperTrackedSequencerStage == superlooperLoopNaturalStage
+    && !superlooperMutationDebugActive(0);
+  return reportFirmwareRegression("superlooper-skip-catchup-io-N" + std::to_string(n),
+    launched && aligned,
+    "advances=" + std::to_string(advances) + " (expected 2 modulo 8), tracked/natural="
+      + std::to_string(superlooperTrackedSequencerStage) + "/"
+      + std::to_string(superlooperLoopNaturalStage));
+}
+
+int superlooperLoopExitIOScenario(unsigned long stepMicros) {
+  prepareSuperlooperTransportIO(0);
+  unsigned long nextClock = micros() + 100000;
+  for (int i = 0; i < 10; ++i) transportIOClock(nextClock, stepMicros);
+  //Press the physical LOOP button, including its normal input debounce.
+  pulseGate(16, 2000, stepMicros);
+  transportIOClock(nextClock, stepMicros);
+  const bool entered = loopEnable;
+  for (int i = 0; i < 2; ++i) transportIOClock(nextClock, stepMicros);
+  pulseGate(16, 2000, stepMicros);
+  transportIOClock(nextClock, stepMicros);
+  runFor(20000, stepMicros); //Allow queued catch-up pulses to drain.
+  const int physicalStage = (countOutputOnsets(13) + 7) % 8;
+  const bool aligned = !loopEnable
+    && physicalStage == superlooperTrackedSequencerStage
+    && physicalStage == superlooperLoopNaturalStage;
+  return reportFirmwareRegression("superlooper-loop-exit-io",
+    entered && aligned,
+    "step-us=" + std::to_string(stepMicros) + ", physical/tracked/natural="
+      + std::to_string(physicalStage) + "/"
+      + std::to_string(superlooperTrackedSequencerStage) + "/"
+      + std::to_string(superlooperLoopNaturalStage));
+}
+
+int superlooperChanceDeadZoneScenario(bool useSplitMode) {
+  prepareSuperlooperTransportIO(0);
+  splitMode = useSplitMode;
+  unsigned long nextClock = micros() + 100000;
+  for (int i = 0; i < 3; ++i) transportIOClock(nextClock);
+  configureAlwaysModify(0, 1024, 0);
+  transportIOClock(nextClock);
+  bool opened = true;
+  for (uint8_t lane = 0; lane < 5; ++lane) {
+    opened = opened && superlooperMutationDebugWindowOpen(lane);
+  }
+
+  //Drop Chance between clocks. New hits must not use the previously open
+  //window, while the clock mutation already in progress keeps its lifetime.
+  setLogicalAnalog(20, 10);
+  pulseTriggerInputs();
+  bool closedImmediately = true;
+  bool noTriggerMutation = true;
+  for (uint8_t lane = 0; lane < 5; ++lane) {
+    closedImmediately = closedImmediately && !superlooperMutationDebugWindowOpen(lane);
+    if (lane > 0) noTriggerMutation = noTriggerMutation && !superlooperMutationDebugActive(lane);
+  }
+  const bool existingMutationKept = superlooperMutationDebugActive(0);
+
+  //Moving back up requires the next clock to open a fresh window.
+  setLogicalAnalog(20, 1024);
+  pulseTriggerInputs();
+  const bool waitedForClock = !superlooperMutationDebugActive(1);
+  runUntil(nextClock);
+  pulseClockAndTriggerInputs();
+  bool resumed = true;
+  for (uint8_t lane = 0; lane < 5; ++lane) {
+    resumed = resumed && superlooperMutationDebugActive(lane);
+  }
+
+  //Exhaust all possible rolled values, including a capped length penalty.
+  bool bottomBlocked = true;
+  for (unsigned int reading = 0; reading <= 10; ++reading) {
+    probRead = reading;
+    for (unsigned int roll = 0; roll <= 1000; ++roll) {
+      bottomBlocked = bottomBlocked && !superlooperWindowFromRoll(roll);
+    }
+  }
+  probRead = 11;
+  const bool aboveThresholdWorks = superlooperWindowFromRoll(0)
+    && superlooperWindowFromRoll(10) && !superlooperWindowFromRoll(11);
+  probRead = 512;
+  const bool midpointUnchanged = superlooperWindowFromRoll(511)
+    && !superlooperWindowFromRoll(512);
+  probRead = 1024;
+  const bool topUnchanged = superlooperWindowFromRoll(1000);
+  return reportFirmwareRegression("superlooper-chance-dead-zone",
+    opened && closedImmediately && noTriggerMutation && existingMutationKept
+      && waitedForClock && resumed && bottomBlocked && aboveThresholdWorks
+      && midpointUnchanged && topUnchanged,
+    "split=" + std::to_string(useSplitMode) + ", bottom/immediate/above="
+      + std::to_string(bottomBlocked) + "/" + std::to_string(closedImmediately)
+      + "/" + std::to_string(aboveThresholdWorks) + ", wait/resume="
+      + std::to_string(waitedForClock) + "/" + std::to_string(resumed));
+}
+
+int superlooperClockStopIOScenario() {
+  prepareSuperlooperTransportIO(0);
+  unsigned long nextClock = micros() + 100000;
+  for (int i = 0; i < 3; ++i) transportIOClock(nextClock);
+  configureAlwaysModify(7, 736, 1024); //Clock ratcheting, long sampled lifetime.
+  transportIOClock(nextClock);
+  const bool launched = superlooperMutationDebugActive(0);
+  runFor(2000000);
+  writes.clear();
+  runFor(100000);
+  const int lateClocks = countOutputOnsets(13);
+#if !defined(IDUM_ENABLE_CLOCK_STOP_TIMEOUT) || IDUM_ENABLE_CLOCK_STOP_TIMEOUT
+  const bool stopped = !superlooperMutationDebugActive(0) && lateClocks == 0;
+#else
+  const bool stopped = superlooperMutationDebugActive(0) && lateClocks > 0;
+#endif
+  setLogicalAnalog(20, 0);
+  pulseGate(15);
+  const bool resumed = countOutputOnsets(13) > lateClocks;
+#if !defined(IDUM_ENABLE_CLOCK_STOP_TIMEOUT) || IDUM_ENABLE_CLOCK_STOP_TIMEOUT
+  const bool behaviorMatched = stopped && resumed;
+#else
+  //The opt-out intentionally keeps the old mutation active; a returning
+  //clock changes its ratchet period rather than restoring dry pass-through.
+  const bool behaviorMatched = stopped;
+#endif
+  return reportFirmwareRegression("superlooper-clock-stop-io",
+    launched && behaviorMatched,
+    "late clocks=" + std::to_string(lateClocks) + ", restart=" + std::to_string(resumed));
+}
+#endif
+
 int removedModeBootRegressionScenario() {
   resetSimulation();
   setup();
@@ -2623,6 +2802,27 @@ int allSuperlooperRegressionsScenario() {
     "regression-superlooper-n-transport",
     "regression-superlooper-rendered-tape",
     "alternate-regression-superlooper-skip-transport",
+    "regression-superlooper-loop-exit-io",
+    "regression-superlooper-loop-exit-io-slow",
+    "regression-superlooper-clock-stop-io",
+    "regression-superlooper-chance-dead-zone",
+    "regression-superlooper-chance-dead-zone-split",
+    "regression-superlooper-playback-recall-0",
+    "regression-superlooper-playback-recall-1",
+    "regression-superlooper-playback-recall-2",
+    "regression-superlooper-playback-recall-3",
+    "regression-superlooper-reverse-rhythm",
+    "regression-superlooper-reverse-entries",
+    "regression-superlooper-playback-mapping",
+    "regression-superlooper-playback-menu",
+    "regression-superlooper-reverse-tape",
+    "regression-superlooper-playback-exits",
+    "regression-superlooper-skip-catchup-io-0",
+    "regression-superlooper-skip-catchup-io-1",
+    "regression-superlooper-skip-catchup-io-2",
+    "regression-superlooper-skip-catchup-io-3",
+    "regression-superlooper-skip-catchup-io-4",
+    "regression-superlooper-skip-catchup-io-5",
     "all-alternate-modes",
   };
 
@@ -2707,6 +2907,45 @@ int runScenario(const std::string& name) {
   if (name == "regression-superlooper-n-transport") return superlooperNTransportRegressionScenario();
   if (name == "regression-superlooper-rendered-tape") return superlooperRenderedTapeRegressionScenario();
   if (name == "regression-superlooper-skip-transport") return superlooperSkipTransportRegressionScenario();
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
+  if (name == "regression-superlooper-loop-exit-io") return superlooperLoopExitIOScenario(100);
+  if (name == "regression-superlooper-loop-exit-io-slow") return superlooperLoopExitIOScenario(1000);
+  if (name == "regression-superlooper-clock-stop-io") return superlooperClockStopIOScenario();
+  if (name == "regression-superlooper-chance-dead-zone") return superlooperChanceDeadZoneScenario(false);
+  if (name == "regression-superlooper-chance-dead-zone-split") return superlooperChanceDeadZoneScenario(true);
+  for (int option = 0; option < 4; ++option) {
+    if (name == "regression-superlooper-playback-recall-" + std::to_string(option))
+      return superlooperPlaybackRecallScenario(option);
+  }
+  if (name == "regression-superlooper-playback-mapping") return superlooperPlaybackMappingScenario();
+  if (name == "regression-superlooper-playback-menu") return superlooperPlaybackMenuScenario();
+  if (name == "regression-superlooper-reverse-tape") return superlooperReverseTapeScenario();
+  if (name == "regression-superlooper-playback-exits") return superlooperPlaybackExitsScenario();
+  if (name == "regression-superlooper-reverse-rhythm") return superlooperReverseRhythmScenario();
+  if (name == "regression-superlooper-reverse-entries") return superlooperReverseEntriesScenario();
+  const std::string reverseEntryPrefix = "reverse-entry-case-";
+  if (name.compare(0, reverseEntryPrefix.size(), reverseEntryPrefix) == 0) {
+    std::string parameters = name.substr(reverseEntryPrefix.size());
+    std::replace(parameters.begin(), parameters.end(), '-', ' ');
+    std::istringstream input(parameters);
+    int n, phase, span, option, tracking;
+    if (!(input >> n >> phase >> span >> option >> tracking)) return 2;
+    return superlooperReverseEntryScenario(n, phase, span, option, tracking);
+  }
+  const std::string playbackExitPrefix = "playback-exit-case-";
+  if (name.compare(0, playbackExitPrefix.size(), playbackExitPrefix) == 0) {
+    std::string parameters = name.substr(playbackExitPrefix.size());
+    std::replace(parameters.begin(), parameters.end(), '-', ' ');
+    std::istringstream input(parameters);
+    int n, phase, option, control;
+    if (!(input >> n >> phase >> option >> control)) return 2;
+    return superlooperPlaybackExitScenario(n, phase, option, control);
+  }
+  const std::string catchupPrefix = "regression-superlooper-skip-catchup-io-";
+  if (name.compare(0, catchupPrefix.size(), catchupPrefix) == 0) {
+    return superlooperSkipCatchupIOScenario(std::stoi(name.substr(catchupPrefix.size())));
+  }
+#endif
   if (name == "regression-removed-mode-boot") return removedModeBootRegressionScenario();
   if (name == "regression-split-loop-empty-step") return splitLoopEmptyStepRegressionScenario();
   if (name == "regression-loop-phase") return loopPhaseAlignmentRegressionScenario();
@@ -3108,6 +3347,12 @@ int eliRatchetChannelFourZeroScenario() {
   );
 }
 }  // namespace
+#endif
+
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
+namespace {
+#include "superlooper_playback_tests.h"
+}
 #endif
 
 int main(int argc, char** argv) {
