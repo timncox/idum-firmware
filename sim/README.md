@@ -106,3 +106,38 @@ Good next scenarios:
 - fixed per-track mode assignment
 - loop-bound modulation
 - CV routing switch behavior
+
+## Engine verification
+
+Run these commands from the repository root:
+
+```sh
+make test-stock-reference
+make test-superlooper
+make test-all
+```
+
+`test-stock-reference` exercises the simulator-only classic reference.
+`test-superlooper` first runs the classic path in both simulator personalities and compares an exact,
+deterministic output/state fingerprint; it then runs the independent
+Superlooper battery with CYCLE up. This makes stock-path drift a test failure
+while allowing Superlooper's tests to change with its intentional semantics.
+
+The Superlooper test battery covers fresh CYCLE transitions, control pickup,
+newest-stage anchoring, N division, `L * N` mutation lifetimes, trigger-owned
+launch and mode preemption, sub-clock capture, crossed-onset playback, smooth
+and quantized speed mappings, menu persistence, speed/direction/Length recall,
+reverse onset timing, tape-head resumption, recorded external transport, Skip
+catch-up, the Chance dead zone, clock loss/restart, and all trigger-producing
+mutation modes. The playback tests include 144 reverse-entry cases and 144
+exit/catch-up cases across N-divider phases. They compare actual simulated
+output edges for a steady beat, accelerating bounce example, unequal gate widths,
+and off-grid triggers against independently calculated reversed hit times.
+The suite also compares
+an exact deterministic fingerprint of the classic runner so Superlooper changes
+cannot silently alter the stock timing path.
+
+The `IDUM_SIM` compatibility shim routes fast digital I/O through the fake
+Arduino functions. Hardware builds retain the normal AVR fast I/O path.
+The simulator exercises firmware logic; final timing validation still requires
+the module. See [hardware diagnostics](../docs/DIAGNOSTICS.md).

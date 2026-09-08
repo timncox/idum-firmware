@@ -1,5 +1,8 @@
 # Building and Uploading
 
+**This repository provides source only; no prebuilt firmware download is provided.**
+The commands below compile the source in your checkout.
+
 This repo is designed for `arduino-cli` so users do not need to open the Arduino IDE.
 
 ## Install Arduino CLI
@@ -55,6 +58,14 @@ default remains `build/release/alt-dum-superlooper-v1.0.0.hex`. The basename
 includes the selected engine so later Alt-DUM engine builds remain
 distinguishable.
 
+Output version names are labels, not source checkouts or published releases.
+Rebuilding an older filename from current source does not reproduce older
+firmware. Record the source commit when sharing a local build; the boot
+animation identifies the firmware family, not the exact source revision.
+
+The explicit Superlooper target is `make superlooper-build`. The shell wrapper
+also accepts a label: `FIRMWARE_VERSION=1.0.1-dev scripts/build.sh`.
+
 Default target:
 
 ```sh
@@ -83,3 +94,27 @@ If the bootloader/board is different, override `FQBN`:
 make build FQBN=arduino:megaavr:nona4809
 make upload FQBN=arduino:megaavr:nona4809 PORT=/dev/cu.usbmodem101
 ```
+
+## Separate development build directories
+
+To keep a local experiment's output separate:
+
+```sh
+make test-superlooper
+make build FIRMWARE_VERSION=dev BUILD_PATH=build/idum-superlooper-dev
+make board-list
+make upload BUILD_PATH=build/idum-superlooper-dev PORT=<detected-port>
+```
+
+Use the Nano Every port reported by `make board-list`.
+
+## Clock-stop behavior
+
+Generated repeats normally stop after the external clock disappears. To
+restore v0.99's unbounded behavior for a custom build:
+
+```sh
+make build FIRMWARE_DEFINES=-DIDUM_ENABLE_CLOCK_STOP_TIMEOUT=0
+```
+
+For temporary ADC and Ball timing images, see [hardware diagnostics](DIAGNOSTICS.md).
