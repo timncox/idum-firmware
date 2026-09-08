@@ -76,6 +76,15 @@ uses a time-based acceleration/deceleration curve with dry pass-through at
 PARAM's center and distinct pulses at its fastest setting.  Ball has been
 modified to predictably end its curve after LEN stages.
 
+**Visual feedback for CHANCE, and a new probability curve.** The CHANCE input
+has a dead zone at the bottom to account for noise.  When moving CHANCE, the
+mode ring is lit up briefly to show the actual chance level, so if MODE LED 0
+is on, CHANCE is effectively 0.  This build introduces a cubic curve such that
+more of the linear range maps to low probabilities, the idea being that the
+difference between 5 and 10% probability is a lot more significant than the
+difference between, say 90-95%.  Note: actual probability is modified based on
+LEN using logic from the stock firmware.
+
 See the [Superlooper reference](docs/SUPERLOOPER.md) for setup instructions,
 control mappings, reverse timing, Chance CV and meter behavior, and transport
 details.
