@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beatgen Programmer</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #d9d6cc;
+    --accent: #c2410c; --accent-ink: #ffffff; --cell: #ece9e0; --ok: #15803d; --err: #b91c1c;
+    --l1: #f3c9a8; --l2: #e8945c; --l3: #d4692b; --lx: #9a3412;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151513; --panel: #1f1f1c; --ink: #ecebe6; --muted: #9a988f; --line: #34332e;
+      --accent: #f97316; --accent-ink: #151513; --cell: #2a2925; --ok: #4ade80; --err: #f87171;
+      --l1: #5c3a24; --l2: #8a4b22; --l3: #c2601f; --lx: #fb923c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 10px; }
+  p { margin: 0 0 10px; }
+  .muted { color: var(--muted); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-top: 16px; }
+  button, select, input[type=number] { font: inherit; color: inherit; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .tabs button[aria-pressed=true] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .grid-wrap { overflow-x: auto; margin-top: 12px; }
+  .grid { display: grid; grid-template-columns: 92px repeat(32, minmax(18px, 1fr)); gap: 3px; min-width: 760px; }
+  .label { font-size: .8rem; color: var(--muted); align-self: center; white-space: nowrap; }
+  .num { font-size: .65rem; color: var(--muted); text-align: center; }
+  .cell { aspect-ratio: 1; border-radius: 4px; background: var(--cell); border: 2px solid transparent; cursor: pointer; padding: 0; }
+  .cell.bar { margin-left: 4px; }
+  .cell[data-l='1'] { background: var(--l1); } .cell[data-l='2'] { background: var(--l2); }
+  .cell[data-l='3'] { background: var(--l3); } .cell[data-l='X'] { background: var(--lx); }
+  .cell.silent { opacity: .35; }
+  .cell.out { opacity: .15; }
+  .cell.now { border-color: var(--ink); }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: .85rem; color: var(--muted); margin-top: 10px; }
+  .legend span::before { content: ''; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; background: var(--c); }
+  label.inline { display: inline-flex; gap: 6px; align-items: center; }
+  #bar { height: 10px; background: var(--cell); border-radius: 5px; overflow: hidden; margin: 12px 0 8px; }
+  #barfill { height: 100%; width: 0; background: var(--accent); }
+  #log { background: var(--cell); border-radius: 8px; padding: 10px; height: 160px; overflow-y: auto; white-space: pre-wrap; font: 12px/1.5 ui-monospace, monospace; }
+  .ok { color: var(--ok); } .err { color: var(--err); }
+  code { font: .9em ui-monospace, monospace; }
+  ol { margin: 0; padding-left: 20px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Beatgen Programmer</h1>
+  <p class="muted">Edit the five drum patterns inside an IDUM Beatgen firmware build, hear them, and flash them to the module from Chrome.</p>
+
+  <section>
+    <h2>1. Load the firmware you built</h2>
+    <p>Pick the <code>alt-dum-beatgen</code> <code>.hex</code> from <code>make beatgen-build</code>. Your patterns are read straight out of it.</p>
+    <div class="row">
+      <input type="file" id="file" accept=".hex">
+      <span id="fileinfo" class="muted"></span>
+    </div>
+  </section>
+
+  <section id="editor" hidden>
+    <h2>2. Edit patterns</h2>
+    <div class="row tabs" id="tabs"></div>
+    <p class="muted" id="slotnote" style="margin-top:8px"></p>
+    <div class="grid-wrap"><div class="grid" id="grid"></div></div>
+    <div class="legend">
+      <span style="--c: var(--cell)">rest</span>
+      <span style="--c: var(--l1)">1 rarely</span>
+      <span style="--c: var(--l2)">2 sometimes</span>
+      <span style="--c: var(--l3)">3 often</span>
+      <span style="--c: var(--lx)">X always</span>
+      <span>Click to raise a step, shift-click or right-click to clear.</span>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <label class="inline">PROB (density) <input type="range" id="density" min="0" max="255" value="128"></label>
+      <label class="inline">LENGTH <select id="length"></select></label>
+      <label class="inline">Tempo <input type="number" id="bpm" min="40" max="240" value="120" style="width:5em"> BPM</label>
+      <button id="play">Play</button>
+      <button id="revert">Undo my edits to this pattern</button>
+    </div>
+    <p class="muted" style="margin-top:10px">Faded steps don't play at this PROB setting. PARAM on the module adds fills and ghost notes on top.</p>
+    <div class="row" style="margin-top:6px">
+      <button id="export">Save patterns as a file</button>
+      <label class="inline"><button id="importBtn">Load patterns from a file</button><input type="file" id="import" accept=".json" hidden></label>
+    </div>
+  </section>
+
+  <section id="flash" hidden>
+    <h2>3. Flash</h2>
+    <ol class="muted">
+      <li>Plug the module's Nano Every into this computer over USB (Eurorack power can stay on).</li>
+      <li>Press Flash and pick the Nano Every in Chrome's port list. It erases and rewrites the firmware, then reads it back to check.</li>
+      <li>Flip CYCLE up to hear Beatgen; down is the stock IDUM engine.</li>
+    </ol>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" id="btnFlash">Flash to module</button>
+      <button id="download">Download edited .hex</button>
+    </div>
+    <div id="bar"><div id="barfill"></div></div>
+    <div id="result"></div>
+    <div id="log"></div>
+  </section>
+
+  <p class="muted" style="margin-top:24px; font-size:.85rem">
+    Beatgen runs on Alt-DUM (github.com/ctanis/idum-firmware), alternate firmware based on IDUM v0.99 by Eli Pechman / Mystic Circuits.
+    The browser flasher is from ID00M by 00 Modular. All CC BY-SA 4.0. Not affiliated with or endorsed by Mystic Circuits.
+    Needs a Chromium desktop browser (Chrome, Edge, Brave) and a localhost page: run <code>python3 -m http.server 8000</code> in this folder.
+  </p>
+</main>
+
+<script type="module">
+import { Jtag2Updi, parseIntelHex, withRetry } from './webserial-jtag2updi.js';
+import { readBank, writeBank, toIntelHex, plays, PATTERN_NAMES, PATTERN_SLOTS, LEVELS, STEPS, CHANNELS } from './beatgen-bank.js';
+
+const $ = (id) => document.getElementById(id);
+const ROWS = ['OUT1 kick', 'OUT2 snare', 'OUT3 hat', 'OUT4 perc'];
+const LENGTHS = [4, 6, 8, 10, 12, 16, 24, 32];
+const STORE = 'beatgen-patterns-v1';
+
+let image = null, fileName = 'beatgen.hex', original = null, patterns = null, current = 0;
+let playing = false, audio = null, timer = null, playStep = -1;
+
+for (const n of LENGTHS) $('length').add(new Option(n + ' steps', n));
+$('length').value = 16;
+
+function log(m, cls) { $('log').innerHTML += `<span class="${cls || ''}">${m}</span>\n`; $('log').scrollTop = $('log').scrollHeight; }
+function save() { try { localStorage.setItem(STORE, JSON.stringify(patterns)); } catch {} }
+
+$('file').onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    image = parseIntelHex(await f.text());
+    original = readBank(image);
+    fileName = f.name;
+    patterns = original.map((rows) => rows.slice());
+    let restored = false;
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORE) || 'null');
+      if (saved && confirm('Use the patterns you were editing last time? Cancel loads the ones in this .hex.')) { patterns = saved; readBankCheck(); restored = true; }
+    } catch { patterns = original.map((rows) => rows.slice()); }
+    $('fileinfo').textContent = `${f.name}: ${image.length} bytes, 5 patterns found${restored ? ' (your saved edits loaded)' : ''}`;
+    $('editor').hidden = $('flash').hidden = false;
+    renderTabs(); render();
+  } catch (err) {
+    $('fileinfo').innerHTML = `<span class="err">${err.message}</span>`;
+    $('editor').hidden = $('flash').hidden = true;
+  }
+};
+
+function readBankCheck() { writeBank(image, patterns); }  // throws if the saved data is malformed
+
+function renderTabs() {
+  $('tabs').innerHTML = '';
+  PATTERN_NAMES.forEach((name, p) => {
+    const b = document.createElement('button');
+    b.textContent = name; b.setAttribute('aria-pressed', p === current);
+    b.onclick = () => { current = p; renderTabs(); render(); };
+    $('tabs').append(b);
+  });
+  $('slotnote').textContent = `${PATTERN_NAMES[current]} plays when the MODE ring sits on LED ${PATTERN_SLOTS[current]}. LED 5 is Euclid, 6 Generative, 8 VCO.`;
+}
+
+function render() {
+  const grid = $('grid'); grid.innerHTML = '';
+  const density = +$('density').value, length = +$('length').value;
+  grid.append(Object.assign(document.createElement('div'), { className: 'label' }));
+  for (let s = 0; s < STEPS; s++) grid.append(Object.assign(document.createElement('div'), { className: 'num', textContent: s % 4 === 0 ? s + 1 : '' }));
+  for (let c = 0; c < CHANNELS; c++) {
+    grid.append(Object.assign(document.createElement('div'), { className: 'label', textContent: ROWS[c] }));
+    for (let s = 0; s < STEPS; s++) {
+      const level = patterns[current][c][s];
+      const cell = document.createElement('button');
+      cell.className = 'cell' + (s % 4 === 0 && s ? ' bar' : '') + (s >= length ? ' out' : (level !== '.' && !plays(level, density) ? ' silent' : '')) + (s === playStep ? ' now' : '');
+      cell.dataset.l = level;
+      cell.title = `${ROWS[c]}, step ${s + 1}: ${level === '.' ? 'rest' : level}`;
+      cell.setAttribute('aria-label', cell.title);
+      const set = (next) => { const row = patterns[current][c]; patterns[current][c] = row.slice(0, s) + next + row.slice(s + 1); save(); render(); };
+      cell.onclick = (e) => set(e.shiftKey ? '.' : LEVELS[(LEVELS.indexOf(level) + 1) % LEVELS.length]);
+      cell.oncontextmenu = (e) => { e.preventDefault(); set('.'); };
+      grid.append(cell);
+    }
+  }
+}
+$('density').oninput = render;
+$('length').onchange = render;
+$('revert').onclick = () => { patterns[current] = original[current].slice(); save(); render(); };
+
+$('export').onclick = () => {
+  const blob = new Blob([JSON.stringify({ format: 'beatgen-patterns', names: PATTERN_NAMES, patterns }, null, 2)], { type: 'application/json' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'beatgen-patterns.json' });
+  a.click(); URL.revokeObjectURL(a.href);
+};
+$('importBtn').onclick = () => $('import').click();
+$('import').onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    const next = data.patterns || data;
+    writeBank(image, next);
+    patterns = next.map((rows) => rows.slice()); save(); render();
+  } catch (err) { alert('That file is not a Beatgen pattern file: ' + err.message); }
+};
+
+// ---- Preview: a tiny drum synth so you can hear edits before flashing ----
+function voice(ctx, c, t) {
+  const g = ctx.createGain(); g.connect(ctx.destination);
+  if (c === 0) {
+    const o = ctx.createOscillator(); o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+    g.gain.setValueAtTime(0.9, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.3); o.connect(g); o.start(t); o.stop(t + 0.3);
+    return;
+  }
+  if (c === 3) {
+    const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = 520;
+    g.gain.setValueAtTime(0.15, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.08); o.connect(g); o.start(t); o.stop(t + 0.08);
+    return;
+  }
+  const len = c === 1 ? 0.18 : 0.05;
+  const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * len), ctx.sampleRate);
+  const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource(); src.buffer = buf;
+  const f = ctx.createBiquadFilter(); f.type = c === 1 ? 'bandpass' : 'highpass'; f.frequency.value = c === 1 ? 1800 : 7000;
+  g.gain.setValueAtTime(c === 1 ? 0.6 : 0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
+  src.connect(f); f.connect(g); src.start(t);
+}
+$('play').onclick = () => {
+  if (playing) { clearInterval(timer); playing = false; playStep = -1; $('play').textContent = 'Play'; render(); return; }
+  audio = audio || new AudioContext();
+  playing = true; $('play').textContent = 'Stop';
+  let next = audio.currentTime + 0.05, step = 0;
+  timer = setInterval(() => {
+    const sixteenth = 60 / (+$('bpm').value || 120) / 4, length = +$('length').value, density = +$('density').value;
+    while (next < audio.currentTime + 0.1) {
+      for (let c = 0; c < CHANNELS; c++) if (plays(patterns[current][c][step], density)) voice(audio, c, next);
+      playStep = step; step = (step + 1) % length; next += sixteenth;
+    }
+    render();
+  }, 25);
+};
+
+// ---- Output ----
+function patchedHex() { return toIntelHex(writeBank(image, patterns)); }
+
+$('download').onclick = () => {
+  const blob = new Blob([patchedHex()], { type: 'text/plain' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: fileName.replace(/\.hex$/i, '') + '-patterns.hex' });
+  a.click(); URL.revokeObjectURL(a.href);
+};
+
+$('btnFlash').onclick = async () => {
+  if (!('serial' in navigator)) { log('Web Serial is not available here. Use desktop Chrome, Edge or Brave on a localhost page.', 'err'); return; }
+  if (!confirm('Erase the module and flash this firmware with your patterns?')) return;
+  const hexText = patchedHex();
+  let port; try { port = await Jtag2Updi.requestPort(); } catch { log('No port picked.'); return; }
+  $('btnFlash').disabled = true; $('result').textContent = ''; $('barfill').style.width = '0';
+  const t0 = performance.now();
+  try {
+    await withRetry(async (attempt) => {
+      if (attempt > 0) log(`retry ${attempt}`);
+      const dev = new Jtag2Updi(port);
+      try {
+        await dev.program(hexText, {
+          onPhase: (p) => log(p),
+          onProgress: (done, total) => { $('barfill').style.width = (100 * done / total).toFixed(1) + '%'; },
+          onEvent: (m) => log(m),
+        });
+      } finally { await dev.close(); }
+    }, { tries: 1 });
+    log(`Flashed and verified in ${Math.round((performance.now() - t0) / 1000)} s.`, 'ok');
+    $('result').innerHTML = '<p class="ok">Flashed and verified. Flip CYCLE up and send a clock.</p>';
+  } catch (err) {
+    log(err.message, 'err');
+    $('result').innerHTML = '<p class="err">Flashing failed. Unplug and replug USB, then try again, or flash from the terminal with make upload.</p>';
+  } finally { $('btnFlash').disabled = false; }
+};
+</script>
+</body>
+</html>

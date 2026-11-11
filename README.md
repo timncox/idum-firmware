@@ -89,6 +89,16 @@ See the [Superlooper reference](docs/SUPERLOOPER.md) for setup instructions,
 control mappings, reverse timing, Chance CV and meter behavior, and transport
 details.
 
+## Beatgen
+
+**Beatgen is the second alternate engine** (`make beatgen-build`). With only a
+clock patched, CYCLE up turns IDUM into a drum pattern generator: house,
+techno, breaks, hip-hop, Euclidean, generative and a user pattern, with PROB as
+density, LENGTH as loop length and PARAM as variation. Slot 8 turns the four
+gate outputs into audio-rate square-wave oscillators (pitch on PARAM, chords on
+LENGTH). A browser page in [`web/`](web/README.md) edits the patterns in a built
+`.hex` and flashes it. See [Beatgen](docs/BEATGEN.md).
+
 ## Bug fixes shared by both engines
 
 These improvements apply to both the classic engine and Superlooper:
@@ -108,6 +118,7 @@ details and additional fixes specific to the classic engine.
 ## Further documentation
 
 - [Building and uploading](docs/BUILDING.md)
+- [Beatgen engine and web programmer](docs/BEATGEN.md)
 - [Boot controls, settings reset, and LED order](docs/BOOT_CONTROLS.md)
 - [Host simulator and regression tests](sim/README.md)
 - [Hardware diagnostics: Ball timing and ADC ranges](docs/DIAGNOSTICS.md)
@@ -121,3 +132,7 @@ Alt-DUM started from the official IDUM v0.99 firmware by Eli Pechman /
 Mystic Circuits. Canonical upstream: [mysticcircuits/IDUM](https://github.com/mysticcircuits/IDUM).
 
 Original license: [Creative Commons Attribution-ShareAlike 4.0](LICENSE.md).
+
+The Beatgen web programmer includes the Web Serial flasher from
+[ID00M](https://00modular.com/id00m/resources/) by 00 Modular, also
+CC BY-SA 4.0.

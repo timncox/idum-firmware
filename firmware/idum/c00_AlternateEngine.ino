@@ -70,6 +70,8 @@ void loop() {
 void runSelectedAlternateEngine() {
 #if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
   runSuperlooperEngine();
+#elif IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_BEATGEN
+  runBeatgenEngine();
 #else
   runClassicEngine();
 #endif
@@ -78,6 +80,8 @@ void runSelectedAlternateEngine() {
 void resetSelectedAlternateEngine() {
 #if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
   resetSuperlooperEngine();
+#elif IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_BEATGEN
+  resetBeatgenEngine();
 #endif
 }
 
