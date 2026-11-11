@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IDUM Emulator</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #d9d6cc;
+    --accent: #c2410c; --accent-ink: #ffffff; --cell: #ece9e0; --err: #b91c1c;
+    --face: #24231f; --face-ink: #ecebe6; --face-muted: #9a988f; --face-line: #3b3a34;
+    --led-off: #3a2a22; --led-on: #ff7a2f; --led-glow: rgba(255, 122, 47, .55);
+    --lane: #ece9e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151513; --panel: #1f1f1c; --ink: #ecebe6; --muted: #9a988f; --line: #34332e;
+      --accent: #f97316; --accent-ink: #151513; --cell: #2a2925; --err: #f87171;
+      --face: #2b2a26; --face-line: #45433c; --lane: #2a2925;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 10px; }
+  p { margin: 0 0 10px; }
+  .muted { color: var(--muted); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-top: 16px; }
+  button, select, input[type=number] { font: inherit; color: inherit; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; }
+  button { cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button[aria-pressed=true] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  button:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .cols > section { margin-top: 0; }
+  input[type=number] { width: 84px; }
+  label.inline { display: inline-flex; gap: 6px; align-items: center; }
+  .err { color: var(--err); }
+
+  /* the module face */
+  .face { background: var(--face); color: var(--face-ink); border-color: var(--face-line); }
+  .face .muted { color: var(--face-muted); }
+  .ring { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; text-align: center; }
+  .led { width: 18px; height: 18px; border-radius: 50%; margin: 0 auto 4px; background: var(--led-off); transition: background .04s; }
+  .led.on { background: var(--led-on); box-shadow: 0 0 12px var(--led-glow); }
+  .ring small { display: block; font-size: .7rem; color: var(--face-muted); line-height: 1.2; }
+  .knobs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 18px; text-align: center; }
+  .knob { width: 76px; height: 76px; margin: 0 auto; cursor: ns-resize; touch-action: none; border-radius: 50%; outline-offset: 3px; }
+  .knob:focus-visible { outline: 2px solid var(--led-on); }
+  .knob svg { width: 100%; height: 100%; display: block; }
+  .knob .track { stroke: var(--face-line); }
+  .knob .fill { stroke: var(--led-on); }
+  .knob .cap { fill: #11110f; stroke: var(--face-line); }
+  .knob .tick { stroke: var(--face-ink); }
+  .knobs .name { font-size: .8rem; letter-spacing: .06em; margin-top: 4px; }
+  .knobs .val { font: 12px ui-monospace, monospace; color: var(--face-muted); }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; margin-top: 18px; }
+  .face button { background: #11110f; color: var(--face-ink); border-color: var(--face-line); }
+  .face button[aria-pressed=true] { background: var(--face-ink); color: var(--face); }
+  .face .loopled { display: inline-flex; gap: 6px; align-items: center; font-size: .85rem; }
+  .face .loopled .led { margin: 0; }
+
+  .pads { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+  .pads button { padding: 14px 4px; }
+  .pads button.held { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .outs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; text-align: center; }
+  .outs .led { width: 22px; height: 22px; }
+  .outs small { display: block; font-size: .8rem; color: var(--muted); }
+  canvas { width: 100%; height: 170px; display: block; margin-top: 12px; border-radius: 8px; background: var(--lane); }
+  .status { font: 13px ui-monospace, monospace; color: var(--muted); margin-top: 8px; }
+  .overlay { text-align: center; padding: 28px 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>IDUM emulator</h1>
+  <p class="muted">The Alt-DUM Beatgen firmware running in your browser, built from the same source as the
+    <code>.hex</code> you flash. Turn the knobs, flip CYCLE, send a clock, and listen to the four outputs.</p>
+
+  <section id="power" class="overlay">
+    <p>Sound needs a click to start.</p>
+    <button class="primary" id="start">Power on</button>
+    <p id="starterr" class="err" hidden></p>
+  </section>
+
+  <div id="ui" hidden>
+    <section class="face" aria-label="Module panel">
+      <div class="ring" id="ring"></div>
+      <div class="knobs" id="knobs"></div>
+      <div class="controls">
+        <button id="cycle" aria-pressed="true" title="CYCLE switch">CYCLE up: Beatgen</button>
+        <button id="loopbtn" title="LOOP button (hold)">LOOP</button>
+        <span class="loopled"><span class="led" id="loopled"></span>LOOP</span>
+        <button id="modebtn" title="MODE button (hold)">MODE</button>
+        <button id="reboot" title="Power cycle the module">Restart</button>
+      </div>
+    </section>
+
+    <div class="cols" style="margin-top:16px">
+      <section>
+        <h2>Inputs</h2>
+        <div class="row">
+          <button id="clockrun" aria-pressed="true">Clock running</button>
+          <label class="inline">BPM <input type="number" id="bpm" min="20" max="400" value="120"></label>
+          <label class="inline">per beat
+            <select id="ppq"><option value="4" selected>4 (16ths)</option><option value="2">2 (8ths)</option><option value="1">1</option><option value="8">8</option><option value="24">24</option></select>
+          </label>
+        </div>
+        <p class="muted" style="margin-top:8px">Hold a pad to keep that input high. Each clock pulse is 5 ms.</p>
+        <div class="pads" id="pads"></div>
+        <label class="inline" style="margin-top:10px"><input type="checkbox" id="latch"> Latch pads (click on, click off)</label>
+      </section>
+
+      <section>
+        <h2>Outputs</h2>
+        <div class="outs" id="outs"></div>
+        <div class="row" style="margin-top:12px">
+          <label class="inline">Listen as
+            <select id="soundmode">
+              <option value="auto" selected>Auto: drums, raw in VCO</option>
+              <option value="drums">Drum sounds</option>
+              <option value="raw">Raw outputs</option>
+            </select>
+          </label>
+          <label class="inline">Volume <input type="range" id="volume" min="0" max="100" value="70"></label>
+        </div>
+        <canvas id="scope" aria-label="Last two seconds of the inputs and outputs"></canvas>
+        <div class="status" id="status"></div>
+      </section>
+    </div>
+
+    <section>
+      <h2>Patterns</h2>
+      <p class="muted">The House, Techno, Breaks, Hip-hop and User slots play the patterns built into the firmware.
+        You can swap in your edits from the <a href="beatgen.html">web programmer</a> or the ones in a <code>.hex</code>.</p>
+      <div class="row">
+        <button id="useedits">Use my programmer edits</button>
+        <label class="inline"><button id="hexbtn">Load patterns from a .hex</button><input type="file" id="hexfile" accept=".hex" hidden></label>
+        <button id="builtin">Back to built-in patterns</button>
+        <span id="patinfo" class="muted"></span>
+      </div>
+    </section>
+
+    <section>
+      <h2>What this is and isn't</h2>
+      <p class="muted">It runs the firmware's own code: every engine, knob reading, pattern, LED and output timing, plus the
+        stock IDUM modes with CYCLE down. It does not run the AVR chip itself, so the timer setup for VCO mode, the real
+        interrupt timing, the analog front end and the output stage are modelled, not emulated. The audio is a model of the
+        outputs: drum sounds stand in for whatever the triggers would hit, and raw mode is the ideal square at the jack.</p>
+    </section>
+  </div>
+</main>
+
+<script type="module">
+import { parseIntelHex } from './webserial-jtag2updi.js';
+import { readBank, validatePatterns } from './beatgen-bank.js';
+
+const $ = (id) => document.getElementById(id);
+const PINS = { clock: 15, tr: [14, 9, 11, 10], loopGate: 12, loopBtn: 16, modeBtn: 0, cycle: 17, mode: 21, prob: 20, length: 18, param: 19 };
+const BEATGEN = ['House', 'Techno', 'Breaks', 'Hip-hop', 'Euclid', 'Generative', 'User', 'VCO'];
+const STOCK = ['Hold', 'Burst', 'Ratchet', 'Ball', 'Rotate', 'Delay', 'Break', 'Skip'];
+const LANES = ['CLK IN', 'OUT1', 'OUT2', 'OUT3', 'OUT4', 'CLK OUT'];
+const LANE_BITS = [5, 0, 1, 2, 3, 4];
+const STORE = 'idum-emulator-v1';
+
+let ctx = null, node = null, builtIn = null, cycleUp = true, clockOn = true;
+const muted = [false, false, false, false];
+const history = [];  // per-block masks, newest last
+let lastLeds = 0, lastMicros = 0, lastWall = 0, speed = 1, hz = 0, blockMs = 2.7;
+
+const saved = (() => { try { return JSON.parse(localStorage.getItem(STORE) || '{}'); } catch { return {}; } })();
+function persist() { try { localStorage.setItem(STORE, JSON.stringify(saved)); } catch {} }
+function send(m) { if (node) node.port.postMessage(m); }
+
+// ---------- ring
+for (let i = 0; i < 8; i++) {
+  const d = document.createElement('div');
+  d.innerHTML = `<div class="led" id="ring${i}"></div><small id="ringname${i}"></small>`;
+  $('ring').append(d);
+}
+function nameRing() { (cycleUp ? BEATGEN : STOCK).forEach((n, i) => { $('ringname' + i).textContent = `${i + 1} ${n}`; }); }
+nameRing();
+
+// ---------- knobs
+const KNOBS = [
+  { key: 'mode', label: 'MODE', pin: PINS.mode, def: 20 },
+  { key: 'prob', label: 'PROB', pin: PINS.prob, def: 600 },
+  { key: 'length', label: 'LENGTH', pin: PINS.length, def: 780 },
+  { key: 'param', label: 'PARAM', pin: PINS.param, def: 0 },
+];
+const ARC = 270, R = 30;
+function arcPath(frac) {
+  const a0 = (135) * Math.PI / 180, a1 = (135 + ARC * frac) * Math.PI / 180;
+  const p = (a) => `${38 + R * Math.cos(a)} ${38 + R * Math.sin(a)}`;
+  return `M ${p(a0)} A ${R} ${R} 0 ${ARC * frac > 180 ? 1 : 0} 1 ${p(a1)}`;
+}
+function makeKnob(k) {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `<div class="knob" role="slider" tabindex="0" aria-label="${k.label}" aria-valuemin="0" aria-valuemax="1024">
+      <svg viewBox="0 0 76 76"><path class="track" d="${arcPath(1)}" fill="none" stroke-width="6" stroke-linecap="round"/>
+      <path class="fill" fill="none" stroke-width="6" stroke-linecap="round"/>
+      <circle class="cap" cx="38" cy="38" r="21" stroke-width="2"/><line class="tick" x1="38" y1="38" x2="38" y2="20" stroke-width="3" stroke-linecap="round"/></svg>
+    </div><div class="name">${k.label}</div><div class="val"></div>`;
+  const el = wrap.querySelector('.knob');
+  const set = (v) => {
+    k.value = Math.max(0, Math.min(1024, Math.round(v)));
+    const f = k.value / 1024;
+    wrap.querySelector('.fill').setAttribute('d', f > 0.002 ? arcPath(f) : '');
+    wrap.querySelector('.tick').setAttribute('transform', `rotate(${-135 + ARC * f} 38 38)`);
+    wrap.querySelector('.val').textContent = k.value;
+    el.setAttribute('aria-valuenow', k.value);
+    send({ type: 'analog', pin: k.pin, value: k.value });
+    saved[k.key] = k.value; persist();
+  };
+  k.set = set;
+  let drag = null;
+  el.addEventListener('pointerdown', (e) => { el.setPointerCapture(e.pointerId); drag = { y: e.clientY, v: k.value }; el.focus(); });
+  el.addEventListener('pointermove', (e) => { if (drag) set(drag.v + (drag.y - e.clientY) * (e.shiftKey ? 1 : 5)); });
+  el.addEventListener('pointerup', () => { drag = null; });
+  el.addEventListener('wheel', (e) => { e.preventDefault(); set(k.value - Math.sign(e.deltaY) * (e.shiftKey ? 4 : 32)); }, { passive: false });
+  el.addEventListener('dblclick', () => set(k.def));
+  el.addEventListener('keydown', (e) => {
+    const step = { ArrowUp: 16, ArrowRight: 16, ArrowDown: -16, ArrowLeft: -16, PageUp: 128, PageDown: -128 }[e.key];
+    if (step) { e.preventDefault(); set(k.value + step); }
+    if (e.key === 'Home') set(0);
+    if (e.key === 'End') set(1024);
+  });
+  $('knobs').append(wrap);
+  set(saved[k.key] ?? k.def);
+}
+
+// ---------- momentary / latching buttons
+function momentary(btn, onChange) {
+  let down = false;
+  const set = (v) => { if (v === down) return; down = v; btn.classList.toggle('held', v); btn.setAttribute('aria-pressed', v); onChange(v); };
+  btn.addEventListener('pointerdown', (e) => {
+    btn.setPointerCapture(e.pointerId);
+    if (btn.dataset.latch === '1' && $('latch').checked) set(!down); else set(true);
+  });
+  const up = () => { if (!(btn.dataset.latch === '1' && $('latch').checked)) set(false); };
+  btn.addEventListener('pointerup', up);
+  btn.addEventListener('pointercancel', up);
+  btn.addEventListener('keydown', (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); set(btn.dataset.latch === '1' && $('latch').checked ? !down : true); } });
+  btn.addEventListener('keyup', (e) => { if (e.key === ' ' || e.key === 'Enter') up(); });
+  $('latch').addEventListener('change', () => { if (!$('latch').checked) set(false); });
+}
+
+const padDefs = [
+  ['TR1', PINS.tr[0], 'reset'], ['TR2', PINS.tr[1], 'fill'], ['TR3', PINS.tr[2], 'new variation'],
+  ['TR4', PINS.tr[3], 'breakdown'], ['LOOP GATE', PINS.loopGate, 'lock while high'],
+];
+for (const [name, pin, hint] of padDefs) {
+  const b = document.createElement('button');
+  b.dataset.latch = '1';
+  b.title = `${name}: ${hint} (in Beatgen)`;
+  b.innerHTML = `${name}<br><small class="muted">${hint}</small>`;
+  momentary(b, (v) => send({ type: 'gate', pin, high: v }));
+  $('pads').append(b);
+}
+const tap = document.createElement('button');
+tap.textContent = 'Tap clock';
+momentary(tap, (v) => send({ type: 'gate', pin: PINS.clock, high: v }));
+$('clockrun').after(tap);
+momentary($('loopbtn'), (v) => send({ type: 'gate', pin: PINS.loopBtn, high: v }));
+momentary($('modebtn'), (v) => send({ type: 'gate', pin: PINS.modeBtn, high: v }));
+
+$('cycle').onclick = () => {
+  cycleUp = !cycleUp;
+  $('cycle').setAttribute('aria-pressed', cycleUp);
+  $('cycle').textContent = cycleUp ? 'CYCLE up: Beatgen' : 'CYCLE down: stock IDUM';
+  send({ type: 'gate', pin: PINS.cycle, high: cycleUp });
+  nameRing();
+  saved.cycleUp = cycleUp; persist();
+};
+
+// ---------- clock
+function sendClock() {
+  const bpm = Math.max(20, Math.min(400, +$('bpm').value || 120));
+  const period = Math.round(60e6 / bpm / +$('ppq').value);
+  send({ type: 'clock', period: clockOn ? period : 0, width: 5000 });
+  saved.bpm = bpm; saved.ppq = $('ppq').value; saved.clockOn = clockOn; persist();
+}
+$('clockrun').onclick = () => {
+  clockOn = !clockOn;
+  $('clockrun').setAttribute('aria-pressed', clockOn);
+  $('clockrun').textContent = clockOn ? 'Clock running' : 'Clock stopped';
+  sendClock();
+};
+$('bpm').onchange = $('ppq').onchange = sendClock;
+
+// ---------- outputs
+['OUT1', 'OUT2', 'OUT3', 'OUT4', 'CLK OUT'].forEach((name, i) => {
+  const d = document.createElement('div');
+  d.innerHTML = `<div class="led" id="out${i}"></div><small>${name}</small>` +
+    (i < 4 ? `<label class="inline" style="font-size:.8rem"><input type="checkbox" checked data-out="${i}"> hear</label>` : '');
+  $('outs').append(d);
+});
+$('outs').addEventListener('change', (e) => { const i = +e.target.dataset.out; muted[i] = !e.target.checked; sendSound(); });
+function sendSound() {
+  send({ type: 'sound', mode: $('soundmode').value, mute: muted, volume: (+$('volume').value / 100) ** 2 });
+  saved.soundmode = $('soundmode').value; saved.volume = $('volume').value; persist();
+}
+$('soundmode').onchange = $('volume').oninput = sendSound;
+
+// ---------- patterns
+const bankBytes = (patterns) => {
+  validatePatterns(patterns);
+  return Uint8Array.from(patterns.flat().join(''), (ch) => ch.charCodeAt(0));
+};
+function loadPatterns(patterns, label) {
+  try { send({ type: 'bank', bytes: bankBytes(patterns) }); $('patinfo').textContent = label; }
+  catch (err) { $('patinfo').innerHTML = `<span class="err">${err.message}</span>`; }
+}
+$('useedits').onclick = () => {
+  let p = null;
+  try { p = JSON.parse(localStorage.getItem('beatgen-patterns-v1') || 'null'); } catch {}
+  if (!p) { $('patinfo').textContent = 'No saved edits yet. Edit patterns in the web programmer first.'; return; }
+  loadPatterns(p, 'Playing your programmer edits.');
+};
+$('hexbtn').onclick = () => $('hexfile').click();
+$('hexfile').onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  try { loadPatterns(readBank(parseIntelHex(await f.text())), `Playing the patterns in ${f.name}.`); }
+  catch (err) { $('patinfo').innerHTML = `<span class="err">${err.message}</span>`; }
+  e.target.value = '';
+};
+$('builtin').onclick = () => { if (builtIn) { send({ type: 'bank', bytes: builtIn }); $('patinfo').textContent = 'Playing the built-in patterns.'; } };
+
+// ---------- state from the worklet
+function onState(m) {
+  lastLeds = m.leds; hz = m.hz; blockMs = m.blockMs;
+  for (const x of m.masks) history.push(x);
+  const keep = Math.ceil(2000 / blockMs);
+  if (history.length > keep) history.splice(0, history.length - keep);
+  const now = performance.now();
+  if (lastWall) speed = 0.9 * speed + 0.1 * ((m.micros - lastMicros) / 1000) / (now - lastWall);
+  lastWall = now; lastMicros = m.micros;
+}
+
+function draw() {
+  for (let i = 0; i < 8; i++) $('ring' + i).classList.toggle('on', (lastLeds & 7) === i);
+  $('loopled').classList.toggle('on', !!(lastLeds & 8));
+  const recent = history.slice(-6).reduce((a, b) => a | b, 0);
+  for (let i = 0; i < 5; i++) $('out' + i).classList.toggle('on', !!(recent >> i & 1));
+  const vco = !!(lastLeds & 32);
+  $('status').textContent = `${cycleUp ? 'Beatgen' : 'Stock IDUM'} · ${Math.round(speed * 100)}% real time` + (vco ? ` · VCO root ${hz} Hz` : '');
+
+  const c = $('scope'), g = c.getContext('2d');
+  const w = c.clientWidth, h = c.clientHeight, dpr = window.devicePixelRatio || 1;
+  if (c.width !== w * dpr) { c.width = w * dpr; c.height = h * dpr; }
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const css = getComputedStyle(document.documentElement);
+  const lane = h / LANES.length, label = 56, n = Math.ceil(2000 / blockMs), x0 = w - history.length * (w - label) / n;
+  g.font = '11px ui-monospace, monospace';
+  LANES.forEach((name, li) => {
+    const y = li * lane;
+    g.fillStyle = css.getPropertyValue('--muted'); g.fillText(name, 6, y + lane / 2 + 4);
+    g.fillStyle = li === 0 || li === 5 ? css.getPropertyValue('--muted') : css.getPropertyValue('--accent');
+    const bw = (w - label) / n;
+    history.forEach((mask, i) => { if (mask >> LANE_BITS[li] & 1) g.fillRect(Math.max(label, x0 + i * bw), y + 4, Math.max(1, bw), lane - 8); });
+  });
+  requestAnimationFrame(draw);
+}
+
+// ---------- start
+async function start() {
+  $('start').disabled = true;
+  try {
+    ctx = new AudioContext({ latencyHint: 'interactive' });
+    const [module] = await Promise.all([
+      WebAssembly.compileStreaming(fetch('emulator/idum-beatgen.wasm')),
+      ctx.audioWorklet.addModule('emulator/idum-worklet.js'),
+    ]);
+    node = new AudioWorkletNode(ctx, 'idum-emulator', { numberOfInputs: 0, outputChannelCount: [2], processorOptions: { module } });
+    node.connect(ctx.destination);
+    await new Promise((resolve) => {
+      node.port.onmessage = (ev) => {
+        if (ev.data.type === 'ready') { builtIn = ev.data.bank; resolve(); }
+        else if (ev.data.type === 'state') onState(ev.data);
+      };
+    });
+    cycleUp = saved.cycleUp ?? true;
+    if (!cycleUp) { cycleUp = true; $('cycle').onclick(); } else send({ type: 'gate', pin: PINS.cycle, high: true });
+    KNOBS.forEach(makeKnob);
+    if (saved.bpm) $('bpm').value = saved.bpm;
+    if (saved.ppq) $('ppq').value = saved.ppq;
+    clockOn = saved.clockOn ?? true;
+    $('clockrun').setAttribute('aria-pressed', clockOn);
+    $('clockrun').textContent = clockOn ? 'Clock running' : 'Clock stopped';
+    if (saved.soundmode) $('soundmode').value = saved.soundmode;
+    if (saved.volume) $('volume').value = saved.volume;
+    sendClock(); sendSound();
+    $('power').hidden = true; $('ui').hidden = false;
+    requestAnimationFrame(draw);
+  } catch (err) {
+    $('start').disabled = false;
+    $('starterr').hidden = false;
+    $('starterr').textContent = location.protocol === 'file:'
+      ? 'Open this page through a local server (see web/README.md), not as a file.'
+      : `Couldn't start: ${err.message}`;
+  }
+}
+$('start').onclick = start;
+$('reboot').onclick = () => {
+  send({ type: 'boot' });
+  send({ type: 'gate', pin: PINS.cycle, high: cycleUp });
+  KNOBS.forEach((k) => k.set(k.value));
+  sendClock();
+};
+</script>
+</body>
+</html>

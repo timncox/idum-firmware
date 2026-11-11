@@ -31,6 +31,12 @@ void runSelectedAlternateEngine();
 void resetSelectedAlternateEngine();
 void runSuperlooperEngine();
 void resetSuperlooperEngine();
+void runBeatgenEngine();
+void resetBeatgenEngine();
+bool beatgenDisplay();
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_BEATGEN
+int beatgenScenario(const std::string& name);
+#endif
 void adcDiagnosticLoop();
 void modifyTest();
 void activateModification();
@@ -2986,6 +2992,9 @@ int runScenario(const std::string& name) {
   }
 
   if (name == "smoke") return smokeScenario();
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_BEATGEN
+  if (name.compare(0, 8, "beatgen-") == 0) return beatgenScenario(name);
+#endif
 #if defined(IDUM_SIM_ELI_OO) || defined(IDUM_SIM_HAS_BOOT_RESET)
   if (name == "boot-led-eeprom") return bootResetScenario();
 #endif
@@ -3332,6 +3341,9 @@ void scatter();
 #if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
 #include "c10_SuperlooperEngine.ino"
 #endif
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_BEATGEN
+#include "c10_BeatgenEngine.ino"
+#endif
 #ifdef IDUM_SIM_ID00M
 #include "b81_contaminationMode.ino"
 #include "b82_scatterMode.ino"
@@ -3470,3 +3482,7 @@ int main(int argc, char** argv) {
   const std::string scenario = argc > 1 ? argv[1] : "smoke";
   return runScenario(scenario);
 }
+
+#if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_BEATGEN
+#include "beatgen_tests.h"
+#endif

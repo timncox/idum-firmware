@@ -6,8 +6,10 @@ ifeq ($(ALT_ENGINE),none)
 ALT_ENGINE_ID := 0
 else ifeq ($(ALT_ENGINE),superlooper)
 ALT_ENGINE_ID := 1
+else ifeq ($(ALT_ENGINE),beatgen)
+ALT_ENGINE_ID := 2
 else
-$(error Unknown ALT_ENGINE '$(ALT_ENGINE)'; expected none or superlooper)
+$(error Unknown ALT_ENGINE '$(ALT_ENGINE)'; expected none, superlooper or beatgen)
 endif
 ENGINE_DEFINE := -DIDUM_ALT_ENGINE=$(ALT_ENGINE_ID)
 FIRMWARE_DEFINES ?=
@@ -34,7 +36,7 @@ SIM_DEFINES ?= -DIDUM_SIM_HAS_ADC_DIAGNOSTIC=1 -DIDUM_SIM_HAS_RNG_SEEDING=1 -DID
 SIM_BUILD := build/sim/idum-sim-$(ALT_ENGINE)
 SIM_INCLUDE_FLAGS := -Isim -I$(SIM_FIRMWARE) -I$(ENGINE_SOURCE)
 
-.PHONY: help doctor setup stage-sketch require-alternate-engine build superlooper-build upload safe-io-build safe-io-upload adc-diagnostic-build adc-diagnostic-upload ball-timing-diagnostic-build ball-timing-diagnostic-upload ball-timing-diagnostic-test clean board-list sim sim-compile sim-modes sim-alternate-modes sim-regressions sim-stock-parity test-stock-reference test-superlooper test-all sim-clock-stop sim-break-patterns sim-break-playback sim-id00m-regressions sim-clean
+.PHONY: help doctor setup stage-sketch require-alternate-engine build superlooper-build upload safe-io-build safe-io-upload adc-diagnostic-build adc-diagnostic-upload ball-timing-diagnostic-build ball-timing-diagnostic-upload ball-timing-diagnostic-test clean board-list sim sim-compile sim-modes sim-alternate-modes sim-regressions sim-stock-parity test-stock-reference test-superlooper test-beatgen beatgen-build test-all emulator test-emulator sim-clock-stop sim-break-patterns sim-break-playback sim-id00m-regressions sim-clean
 
 help:
 	@echo "Alt-DUM firmware build targets"
@@ -43,6 +45,7 @@ help:
 	@echo "  make doctor               Check local command-line toolchain"
 	@echo "  make build                Stage stock/shared source plus the selected engine and compile"
 	@echo "  make superlooper-build    Compile production firmware (CYCLE selects Superlooper)"
+	@echo "  make beatgen-build        Compile production firmware (CYCLE selects Beatgen)"
 	@echo "  make safe-io-build        Compile firmware using normal Arduino pin I/O"
 	@echo "  make safe-io-upload PORT=<port> Upload normal Arduino pin I/O firmware"
 	@echo "  make adc-diagnostic-build Compile USB ADC diagnostic firmware"
@@ -55,7 +58,10 @@ help:
 	@echo "  make sim-stock-parity     Compare exact stock-runner output across firmware personalities"
 	@echo "  make test-stock-reference Run the no-alternate reference regression battery"
 	@echo "  make test-superlooper     Confirm stock parity, then run the Superlooper battery"
-	@echo "  make test-all             Run both firmware-personality contracts"
+	@echo "  make test-beatgen         Confirm stock parity, then run the Beatgen battery"
+	@echo "  make test-emulator        Check the browser emulator (web/emulator.html) runs the firmware"
+	@echo "  make emulator             Rebuild the emulator after changing firmware (needs clang wasm32)"
+	@echo "  make test-all             Run every firmware-personality contract"
 	@echo "  make sim-regressions      Run all faithful bug-fix regressions against this fork"
 	@echo "  make sim-clock-stop       Run the clock-stop generated-repeat regression"
 	@echo "  make sim-break-patterns   Print the Break mode preset rhythm table"
@@ -99,6 +105,9 @@ build: require-alternate-engine stage-sketch
 
 superlooper-build:
 	$(MAKE) build ALT_ENGINE=superlooper
+
+beatgen-build:
+	$(MAKE) build ALT_ENGINE=beatgen
 
 upload: stage-sketch
 	@if [ -z "$(PORT)" ]; then echo "Set PORT, for example: make upload PORT=/dev/cu.usbmodem101"; exit 2; fi
@@ -169,9 +178,39 @@ test-superlooper:
 	$(MAKE) sim-compile ALT_ENGINE=superlooper
 	build/sim/idum-sim-superlooper all-superlooper-regressions
 
+test-beatgen:
+	$(MAKE) sim-compile ALT_ENGINE=none
+	$(MAKE) sim-compile ALT_ENGINE=beatgen
+	scripts/compare-stock-engine-fingerprint.sh beatgen
+	build/sim/idum-sim-beatgen beatgen-all
+
+# Browser emulator (web/emulator.html). The .wasm is committed, so this is only needed after
+# changing firmware sources. Needs a clang with the wasm32 target and wasm-ld; on a Mac:
+#   brew install llvm lld && make emulator EMU_CXX=$$(brew --prefix llvm)/bin/clang++
+EMU_CXX ?= clang++
+EMU_WASM := web/emulator/idum-beatgen.wasm
+EMU_SOURCES := sim/emulator/emu.cpp sim/emulator/Arduino.h sim/emulator/EEPROM.h $(wildcard $(STOCK_SKETCH)/*.ino $(STOCK_SKETCH)/*.h) $(wildcard $(ENGINE_ROOT)/beatgen/*.ino)
+EMU_HASH = cat $(sort $(EMU_SOURCES)) | shasum -a 256 | cut -d' ' -f1
+
+emulator:
+	$(EMU_CXX) --target=wasm32 -nostdlib -ffreestanding -fno-exceptions -fno-rtti -std=c++17 -O2 \
+	  -Wno-comment -DIDUM_ALT_ENGINE=2 $(SIM_DEFINES) \
+	  -Isim/emulator -I$(STOCK_SKETCH) -I$(ENGINE_ROOT)/beatgen \
+	  -Wl,--no-entry -Wl,--export-dynamic -Wl,--strip-debug \
+	  sim/emulator/emu.cpp -o $(EMU_WASM)
+	@$(EMU_HASH) > web/emulator/SOURCES.sha256
+	@echo "built $(EMU_WASM)"
+
+test-emulator:
+	@if [ "$$($(EMU_HASH))" != "$$(cat web/emulator/SOURCES.sha256)" ]; then \
+	  echo "NOTE: firmware sources changed since $(EMU_WASM) was built; run make emulator"; fi
+	node sim/emulator/emu-test.mjs $(EMU_WASM)
+	node sim/emulator/worklet-test.mjs
+
 test-all:
 	$(MAKE) test-stock-reference
 	$(MAKE) test-superlooper
+	$(MAKE) test-beatgen
 
 sim-regressions:
 	mkdir -p build/sim

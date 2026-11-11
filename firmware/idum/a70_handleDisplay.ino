@@ -10,6 +10,8 @@ void handleDisplay() {
 
 #if IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_SUPERLOOPER
   if (superlooperDisplayChance()) return;
+#elif IDUM_ALT_ENGINE == IDUM_ALT_ENGINE_BEATGEN
+  if (beatgenDisplay()) return;
 #endif
 
   calculateDisplayCounters();  //counts every time we run this program for different brightness levels
