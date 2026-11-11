@@ -97,7 +97,8 @@ techno, breaks, hip-hop, Euclidean, generative and a user pattern, with PROB as
 density, LENGTH as loop length and PARAM as variation. Slot 8 turns the four
 gate outputs into audio-rate square-wave oscillators (pitch on PARAM, chords on
 LENGTH). A browser page in [`web/`](web/README.md) edits the patterns in a built
-`.hex` and flashes it. See [Beatgen](docs/BEATGEN.md).
+`.hex` and flashes it, and a browser emulator lets you play and hear the build
+before flashing. See [Beatgen](docs/BEATGEN.md).
 
 ## Bug fixes shared by both engines
 

@@ -87,6 +87,20 @@ Edit them either in
 programmer in [`web/`](../web/README.md), which reads the patterns out of a
 built `.hex`, lets you edit and audition them, and flashes the result.
 
+## Try it before flashing
+
+`web/emulator.html` runs this firmware in the browser: knobs, CYCLE, LOOP and
+MODE buttons, TR1-TR4 and LOOP GATE pads, an internal clock (or tap it), the
+ring and LOOP LEDs, and the four outputs as sound (drum voices for triggers,
+the raw squares in VCO mode) with a two-second scope. It can play your edits
+from the web programmer or the patterns in a `.hex`. See
+[`web/README.md`](../web/README.md#emulator) for how to open it.
+
+It runs the firmware's C++ (every engine, the stock modes too), compiled to
+WebAssembly from the same sources as the `.hex`. It is not an AVR emulator: the
+timer and interrupt setup for VCO mode, the analog inputs and the output stage
+are modelled, so a hardware test still has the last word.
+
 ## Tests
 
 ```sh
@@ -98,7 +112,8 @@ Beatgen scenarios in the simulator: clock-only beats, density, every loop
 length, reset, the LOOP lock, fills, breakdown, Euclid counts, generative
 re-rolls, VCO pitch and chords (including the software oscillator maths),
 and that leaving VCO mode stops the oscillators. `make test-all` now runs it
-too.
+too. `make test-emulator` checks the browser emulator's build plays beats,
+VCO pitches and patterns and returns to stock with CYCLE down.
 
 Not covered by the simulator: real timer registers, the interrupt's CPU load
 (about 16% at 31.25 kHz), how the output stage handles audio, and the ring
